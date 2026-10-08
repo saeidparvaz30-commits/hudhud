@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ulid import ULID
 
-MIGRATIONS = Path("../hub/src/hudhud_hub/migrations")
+MIGRATIONS = Path(__file__).parent / "migrations"
 SOFT_DELETABLE = {"books", "highlights"}
 MIGRATION_RE = re.compile(r"^(\d{4})_[\w-]+\.sql$")
 

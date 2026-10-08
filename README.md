@@ -9,37 +9,28 @@ birds to the Simorgh.
 
 ## Status
 
-Early and learning-first. The hub is built through guided Jupyter notebooks:
-each one explains a concept, gives function signatures and tests, and the code
-graduates into `hub/src/hudhud_hub/` once the tests pass.
+Early development. The hub's core modules exist and are tested:
 
-| Notebook | Graduates to |
+| Module | Does |
 |---|---|
-| 00 Setup and tour | (none) |
-| 01 Book formats | `library.py` |
-| 02 Data model | `db.py` |
-| 03 Locators and progress | `progress.py` |
-| 04 Vault writer | `vault.py` |
+| `library.py` | Imports EPUB, PDF, MOBI, AZW3, FB2, CBZ and TXT: format detection, DRM rejection, metadata, covers, content addressing |
+| `db.py` | SQLite connection, migrations, ULIDs, tombstones |
+| `progress.py` | Per-device reading positions and the resume rule |
+| `vault.py` | Writes highlights into a managed region of an Obsidian note |
+
+Search, sync, the HTTP API and the reader client come next.
 
 ## Layout
 
     hub/         Python hub (uv project): src/hudhud_hub/, tests/
-    notebooks/   guided notebooks; solutions/ holds reference answers
     LICENSE      AGPL-3.0-or-later
     CLA.md       contributor licence agreement
 
-## Working the notebooks
+## Development
 
     uv sync --project hub
-    uv run --project hub jupyter lab notebooks
-
-Fill in each cell that raises `NotImplementedError`, then run the test cells.
-Look in `notebooks/solutions/` only when stuck.
-
-Check every notebook (tests pass with the reference answers, fail with the
-stubs):
-
     uv run --project hub pytest hub/tests
+    uv run --project hub ruff check .
 
 ## Licence
 
