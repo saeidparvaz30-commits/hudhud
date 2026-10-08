@@ -52,6 +52,11 @@ def main() -> int:
         "--collect-data", "hudhud_hub",
         "--collect-submodules", "uvicorn",
         "--collect-submodules", "hudhud_hub",
+        # semantic search: fastembed's model registry plus the ONNX runtime and tokenizers
+        "--collect-all", "fastembed",
+        "--collect-binaries", "onnxruntime",
+        "--collect-submodules", "onnxruntime",
+        "--collect-binaries", "tokenizers",
         str(ENTRY),
     ], check=True)
     suffix = ".exe" if os.name == "nt" else ""
