@@ -8,7 +8,7 @@
 const RTL_SCRIPT = /[֐-ࣿיִ-﷿ﹰ-﻿]/g
 const PARAGRAPHS_PER_SECTION = 40
 
-function escapeXml(text: string): string {
+export function escapeXml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     // Characters XML 1.0 forbids (control codes other than tab, LF, CR).
     // eslint-disable-next-line no-control-regex

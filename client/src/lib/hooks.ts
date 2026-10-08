@@ -73,7 +73,7 @@ export interface ReadingPrefs {
   margin: number
   justify: boolean
   /** PDFs and comics: how a page fits the screen, and one page or two side by side. */
-  pageFit: 'fit-page' | 'fit-width'
+  pageFit: 'fit-page' | 'fit-width' | number  // a number is a pinch zoom scale
   pageSpread: 'one' | 'two'
 }
 

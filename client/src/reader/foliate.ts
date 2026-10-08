@@ -29,6 +29,7 @@ export interface FoliateBook {
 
 export interface FoliateRenderer extends HTMLElement {
   setStyles?(css: string): void
+  getContents(): { doc: Document; index: number }[]
   next(): Promise<void>
   prev(): Promise<void>
 }
@@ -40,7 +41,8 @@ export interface FoliateView extends HTMLElement {
   lastLocation: RelocateDetail | null
   open(file: File | FoliateBook): Promise<void>
   close(): void
-  init(options: { lastLocation?: string | null; showTextStart?: boolean }): Promise<void>
+  init(options: { lastLocation?: string | number | null
+                  showTextStart?: boolean }): Promise<void>
   goTo(target: string | number): Promise<unknown>
   goToFraction(fraction: number): Promise<void>
   goLeft(): Promise<void>

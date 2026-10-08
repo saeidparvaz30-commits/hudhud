@@ -10,10 +10,12 @@ import { bookHighlights, bookProgress, db, getBook, getPairing } from '../lib/db
 import { navigate, type ReadingPrefs, setPrefs, type Theme, useLive, usePrefs } from '../lib/hooks'
 import { dataChanged, syncNow } from '../lib/sync'
 import { shouldOfferResume } from '../lib/merge'
-import type { Highlight, HighlightColor, Progress } from '../lib/types'
+import type { Book, Highlight, HighlightColor, Progress } from '../lib/types'
 import { bookCss, type FoliateView, HIGHLIGHT_CSS, loadFoliate, type RelocateDetail,
          type TocItem, toFoliateFile } from './foliate'
 import { HighlightPopover, type PopoverTarget } from './HighlightPopover'
+import { drawableLocator, navigationTarget, sectionCfi, storedLocator } from './locators'
+import { pdfToFb2 } from './pdfText'
 
 const THEME_COLORS: Record<Theme, { paper: string; ink: string; accent: string
                                     selection: string }> = {
@@ -24,12 +26,94 @@ const THEME_COLORS: Record<Theme, { paper: string; ink: string; accent: string
 
 type Overlayer = { highlight: unknown }
 type Panel = null | 'toc' | 'highlights' | 'style'
+type PdfView = 'page' | 'text'
+
+const TEXT_VIEW_CACHE = (id: string) => `${id}:text-v1`
+const viewKey = (id: string) => `hudhud.view.${id}`
+
+/** Phones get the reflowed text view by default; a choice per book is remembered. */
+function initialPdfView(bookId: string): PdfView {
+  try {
+    const saved = localStorage.getItem(viewKey(bookId))
+    if (saved === 'page' || saved === 'text') return saved
+  } catch {
+    /* storage unavailable */
+  }
+  return window.innerWidth < 768 ? 'text' : 'page'
+}
+
+/** The PDF rebuilt as reflowable FB2 (cached, since extraction takes a moment). */
+async function textViewFile(book: Book, onProgress: (done: number, total: number) => void) {
+  const d = await db()
+  let blob = await d.get('files', TEXT_VIEW_CACHE(book.id))
+  if (!blob) {
+    const fb2 = await pdfToFb2(await getBookFile(book), book.title, book.language, onProgress)
+    blob = new Blob([fb2], { type: 'application/x-fictionbook+xml' })
+    await d.put('files', blob, TEXT_VIEW_CACHE(book.id))
+  }
+  return new File([blob], `${book.id}.fb2`, { type: 'application/x-fictionbook+xml' })
+}
+
+interface GestureHandlers {
+  swipe: boolean
+  onPinchMove(ratio: number): void
+  onPinchEnd(ratio: number): void
+  onSwipe(dx: number): void
+}
+
+/** Two-finger pinch everywhere; one-finger swipe where foliate does not handle it. */
+function attachGestures(target: EventTarget, handlers: GestureHandlers) {
+  let startDistance = 0
+  let ratio = 1
+  let multiTouch = false
+  let sx = 0
+  let sy = 0
+  let st = 0
+  const distance = (t: TouchList) =>
+    Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+  target.addEventListener('touchstart', (event) => {
+    const e = event as TouchEvent
+    if (e.touches.length === 2) {
+      startDistance = distance(e.touches)
+      ratio = 1
+      multiTouch = true
+      e.preventDefault()  // keep the browser from zooming the whole app
+    } else if (e.touches.length === 1) {
+      multiTouch = false
+      sx = e.touches[0].clientX
+      sy = e.touches[0].clientY
+      st = e.timeStamp
+    }
+  }, { passive: false })
+  target.addEventListener('touchmove', (event) => {
+    const e = event as TouchEvent
+    if (!startDistance || e.touches.length !== 2) return
+    ratio = distance(e.touches) / startDistance
+    handlers.onPinchMove(ratio)
+    e.preventDefault()
+  }, { passive: false })
+  target.addEventListener('touchend', (event) => {
+    const e = event as TouchEvent
+    if (startDistance && e.touches.length < 2) {
+      handlers.onPinchEnd(ratio)
+      startDistance = 0
+      return
+    }
+    if (multiTouch || !handlers.swipe || e.changedTouches.length !== 1) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - sx
+    const dy = t.clientY - sy
+    if (Math.abs(dx) > 50 && Math.abs(dx) > 1.5 * Math.abs(dy) && e.timeStamp - st < 700) {
+      handlers.onSwipe(dx)
+    }
+  })
+}
 
 function applyLayout(view: FoliateView, prefs: ReadingPrefs) {
   const r = view.renderer
   if (view.isFixedLayout) {
     // PDFs and comics are page images: text size means nothing, the page zoom does.
-    r.setAttribute('zoom', prefs.pageFit)
+    r.setAttribute('zoom', String(prefs.pageFit))
     return
   }
   r.setAttribute('flow', 'paginated')
@@ -52,6 +136,13 @@ function frameOffset(doc: Document): { left: number; top: number; scale: number 
   const rect = frame.getBoundingClientRect()
   const scale = frame.offsetWidth ? rect.width / frame.offsetWidth : 1
   return { left: rect.left, top: rect.top, scale }
+}
+
+/** The scale a fixed-layout page is drawn at. pdf.js renders at the zoom directly and
+ * records it as --scale-factor (times devicePixelRatio); comics use a CSS transform. */
+function pageScale(doc: Document): number {
+  const factor = parseFloat(getComputedStyle(doc.documentElement).getPropertyValue('--scale-factor'))
+  return factor ? factor / window.devicePixelRatio : frameOffset(doc).scale
 }
 
 function TocList({ items, onPick, depth = 0 }: { items: TocItem[]; onPick(href: string): void
@@ -88,7 +179,21 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
   // The locator last saved for this device; opening a book must not count as reading it.
   const savedCfi = useRef<string | null>(null)
   const reopenAt = useRef<string | null>(null)
+  const textMode = useRef(false)  // the open view is a PDF's text view
   const pageSpread = prefs.pageSpread
+  const [pdfView, setPdfViewState] = useState<PdfView>(() => initialPdfView(bookId))
+  const textView = book?.format === 'pdf' && pdfView === 'text'
+  const [preparing, setPreparing] = useState<string | null>(null)
+  const [pinchHint, setPinchHint] = useState<string | null>(null)
+
+  function setPdfView(next: PdfView) {
+    try {
+      localStorage.setItem(viewKey(bookId), next)
+    } catch {
+      /* storage unavailable: still switch for this session */
+    }
+    setPdfViewState(next)
+  }
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState('')
@@ -105,9 +210,12 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
     clearTimeout(saveTimer.current)
     const detail = pendingSave.current
     pendingSave.current = null
-    if (!detail?.cfi || detail.cfi === savedCfi.current) return
-    savedCfi.current = detail.cfi
-    await saveProgress(bookId, detail.cfi, detail.fraction ?? 0)
+    // In a PDF's text view the position is saved per page, which both views understand.
+    const cfi = textMode.current && detail?.section ? sectionCfi(detail.section.current)
+      : detail?.cfi
+    if (!cfi || cfi === savedCfi.current) return
+    savedCfi.current = cfi
+    await saveProgress(bookId, cfi, detail?.fraction ?? 0)
   }, [bookId])
 
   const openPopover = useCallback((doc: Document, range: Range, data: Partial<PopoverTarget>) => {
@@ -124,6 +232,36 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
     let cancelled = false
     let view: FoliateView | undefined
     let stopResumeWatch = () => {}
+    const isText = textView
+    textMode.current = isText
+
+    const gestures = (fixed: boolean): GestureHandlers => ({
+      swipe: fixed,
+      onPinchMove: (ratio) => {
+        container.style.transform = `scale(${ratio})`
+        const base = fixed ? 1 : prefsRef.current.fontScale
+        setPinchHint(`${Math.round(base * ratio * 100)}%`)
+      },
+      onPinchEnd: (ratio) => {
+        container.style.transform = ''
+        setPinchHint(null)
+        if (Math.abs(ratio - 1) < 0.05) return
+        if (fixed) {
+          const visible = view?.renderer.getContents()
+            .find(({ doc }) => doc.defaultView?.frameElement?.getBoundingClientRect().width)
+          const current = visible ? pageScale(visible.doc) : 1
+          setPrefs({ pageFit: Math.round(Math.min(8, Math.max(0.25, current * ratio)) * 100) / 100 })
+        } else {
+          const next = prefsRef.current.fontScale * ratio
+          setPrefs({ fontScale: Math.round(Math.min(3, Math.max(0.7, next)) * 20) / 20 })
+        }
+      },
+      onSwipe: (dx) => {
+        // A zoomed page pans with one finger; only fitted pages turn on swipe.
+        if (typeof prefsRef.current.pageFit === 'number') return
+        void (dx < 0 ? view?.goRight() : view?.goLeft())
+      },
+    })
 
     const onKey = (e: KeyboardEvent) => {
       const v = viewRef.current
@@ -135,6 +273,7 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
 
     const attachDoc = (doc: Document, index: number) => {
       doc.addEventListener('keydown', onKey)
+      attachGestures(doc, gestures(Boolean(view?.isFixedLayout)))
       let lastCfi = ''
       const checkSelection = () => {
         const sel = doc.getSelection()
@@ -145,7 +284,7 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
         const cfi = view.getCFI(index, range)
         if (cfi === lastCfi) return
         lastCfi = cfi
-        openPopover(doc, range, { cfi, text })
+        openPopover(doc, range, { cfi: storedLocator(cfi, isText), text })
       }
       let timer: ReturnType<typeof setTimeout> | undefined
       doc.addEventListener('pointerup', () => setTimeout(checkSelection, 20))
@@ -176,7 +315,13 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
       try {
         const { Overlayer, makeBook } = await loadFoliate()
         overlayer.current = Overlayer
-        const parsed = await makeBook(await toFoliateFile(book, await getBookFile(book)))
+        const source = isText
+          ? await textViewFile(book, (done, total) => {
+            if (!cancelled) setPreparing(`Preparing text view, page ${done} of ${total}`)
+          })
+          : await toFoliateFile(book, await getBookFile(book))
+        setPreparing(null)
+        const parsed = await makeBook(source)
         if (cancelled) return
         if (parsed.rendition?.layout === 'pre-paginated' && pageSpread === 'one') {
           parsed.rendition = { ...parsed.rendition, spread: 'none' }
@@ -203,9 +348,11 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
         view.addEventListener('create-overlay', (e) => {
           const { index } = (e as CustomEvent<{ index: number }>).detail
           for (const h of highlightsRef.current) {
+            const value = drawableLocator(h.locator, isText)
+            if (!value) continue
             try {
-              if (view!.resolveCFI(h.locator).index === index) {
-                void view!.addAnnotation({ value: h.locator, color: h.color })
+              if (view!.resolveCFI(value).index === index) {
+                void view!.addAnnotation({ value, color: h.color })
               }
             } catch {
               /* a locator this rendition cannot resolve */
@@ -220,7 +367,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
         })
         view.addEventListener('show-annotation', (e) => {
           const { value, range } = (e as CustomEvent<{ value: string; range: Range }>).detail
-          const existing = highlightsRef.current.find((h) => h.locator === value)
+          const existing = highlightsRef.current
+            .find((h) => drawableLocator(h.locator, isText) === value)
           if (!existing) return
           annotationHit.current = true
           openPopover(range.startContainer.ownerDocument!, range, { existing })
@@ -228,6 +376,7 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
 
         applyLayout(view, prefsRef.current)
         if (view.isFixedLayout) container.classList.add('paper-tint')
+        attachGestures(container, gestures(view.isFixedLayout))
 
         const pairing = await getPairing()
         const progress = await bookProgress(bookId)
@@ -236,7 +385,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
         const start = reopenAt.current ?? jump ?? own?.locator
         reopenAt.current = null
         savedCfi.current = own?.locator ?? null
-        await view.init({ lastLocation: start ?? null, showTextStart: !start })
+        await view.init({ lastLocation: start ? navigationTarget(start, isText) : null,
+                          showTextStart: !start })
         if (cancelled) return
         setStatus('ready')
 
@@ -287,27 +437,34 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
       document.removeEventListener('visibilitychange', onHide)
       window.removeEventListener('pagehide', onLeave)
       void flushSave()
-      reopenAt.current = view?.lastLocation?.cfi ?? null  // a layout change reopens here
+      // A layout or view change reopens here, stored so either view can resolve it.
+      const at = view?.lastLocation?.cfi
+      reopenAt.current = at ? storedLocator(at, isText) : null
+      container.style.transform = ''
       view?.close()
       view?.remove()
       viewRef.current = null
       drawn.current.clear()
       container.classList.remove('paper-tint')
     }
-    // Re-open only when the book or the page spread changes, not on metadata refreshes.
+    // Re-open only when the book, page spread or PDF view changes, not on metadata refreshes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book?.id, pageSpread])
+  }, [book?.id, pageSpread, textView])
 
   // Keep drawn annotations in step with local edits and synced changes.
   useEffect(() => {
     highlightsRef.current = highlights ?? []
     const view = viewRef.current
     if (!view || status !== 'ready') return
-    const live = new Map((highlights ?? []).map((h) => [h.locator, h]))
-    for (const locator of drawn.current) {
-      if (!live.has(locator)) void view.deleteAnnotation({ value: locator })
+    const live = new Map<string, Highlight>()
+    for (const h of highlights ?? []) {
+      const value = drawableLocator(h.locator, textMode.current)
+      if (value) live.set(value, h)
     }
-    for (const h of live.values()) void view.addAnnotation({ value: h.locator, color: h.color })
+    for (const value of drawn.current) {
+      if (!live.has(value)) void view.deleteAnnotation({ value })
+    }
+    for (const [value, h] of live) void view.addAnnotation({ value, color: h.color })
     drawn.current = new Set(live.keys())
   }, [highlights, status])
 
@@ -364,7 +521,9 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
       <div className="relative min-h-0 flex-1">
         <div ref={host} className="absolute inset-0 z-10" />
         {status === 'loading' && (
-          <p className="absolute inset-0 z-20 grid place-items-center text-muted">Opening…</p>
+          <p className="absolute inset-0 z-20 grid place-items-center px-6 text-center text-muted">
+            {preparing ?? 'Opening…'}
+          </p>
         )}
         {status === 'error' && (
           <div className="absolute inset-0 z-20 grid place-items-center p-6 text-center">
@@ -374,11 +533,16 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
             </div>
           </div>
         )}
+        {pinchHint && (
+          <div className="pointer-events-none absolute inset-x-0 top-4 z-30 mx-auto w-fit rounded-full bg-ink/80 px-3 py-1 text-sm text-paper">
+            {pinchHint}
+          </div>
+        )}
         {resume && (
           <div role="status" className="absolute inset-x-0 top-3 z-30 mx-auto flex w-fit max-w-[92%] items-center gap-3 rounded-full border border-rule bg-raised px-4 py-2 text-sm shadow-lg">
             <span>Continue from {resume.device} at {Math.round(resume.progress.fraction * 100)}%?</span>
             <button type="button" className="font-medium text-accent" onClick={() => {
-              void viewRef.current?.goTo(resume.progress.locator)
+              void viewRef.current?.goTo(navigationTarget(resume.progress.locator, textMode.current))
               setResume(null)
             }}>Continue</button>
             <button type="button" className="text-muted" onClick={() => setResume(null)}>Stay</button>
@@ -397,10 +561,15 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
                 ? <TocList items={toc} onPick={(href) => { void viewRef.current?.goTo(href); setPanel(null) }} />
                 : <p className="p-3 text-sm text-muted">This book has no table of contents.</p>)}
               {panel === 'highlights' && <HighlightList highlights={highlights ?? []}
-                onPick={(h) => { void viewRef.current?.goTo(h.locator); setPanel(null) }}
+                onPick={(h) => {
+                  void viewRef.current?.goTo(navigationTarget(h.locator, textMode.current))
+                  setPanel(null)
+                }}
                 onDelete={(h) => void deleteHighlight(h)} />}
               {panel === 'style' && <StylePanel prefs={prefs}
-                                                fixedLayout={viewRef.current?.isFixedLayout ?? false} />}
+                                                fixedLayout={viewRef.current?.isFixedLayout ?? false}
+                                                pdfView={book?.format === 'pdf' ? pdfView : null}
+                                                onPdfView={setPdfView} />}
             </div>
           </aside>
         )}
@@ -469,7 +638,9 @@ function Segmented<T extends string>({ value, options, onChange }: {
   )
 }
 
-function StylePanel({ prefs, fixedLayout }: { prefs: ReadingPrefs; fixedLayout: boolean }) {
+function StylePanel({ prefs, fixedLayout, pdfView, onPdfView }: {
+  prefs: ReadingPrefs; fixedLayout: boolean; pdfView: PdfView | null; onPdfView(v: PdfView): void
+}) {
   const step = (key: 'fontScale' | 'lineHeight' | 'margin', delta: number, min: number, max: number) =>
     setPrefs({ [key]: Math.round(Math.min(max, Math.max(min, prefs[key] + delta)) * 100) / 100 })
   const row = 'flex items-center justify-between px-3 py-3 text-sm'
@@ -484,11 +655,24 @@ function StylePanel({ prefs, fixedLayout }: { prefs: ReadingPrefs; fixedLayout: 
           </button>
         ))}
       </div>
+      {pdfView && (
+        <div className="flex items-center justify-between px-3 py-3 text-sm">
+          <span>View</span>
+          <Segmented value={pdfView} onChange={onPdfView}
+                     options={[['page', 'Pages'], ['text', 'Text']]} />
+        </div>
+      )}
+      {pdfView === 'text' && (
+        <p className="px-3 pb-2 text-xs text-muted">
+          Text view reflows the PDF for small screens. Figures and layout are in Pages view.
+        </p>
+      )}
       {fixedLayout ? (
         <>
           <div className={row}>
             <span>Page fit</span>
-            <Segmented value={prefs.pageFit} onChange={(pageFit) => setPrefs({ pageFit })}
+            <Segmented value={typeof prefs.pageFit === 'number' ? 'zoomed' : prefs.pageFit}
+                       onChange={(pageFit) => pageFit !== 'zoomed' && setPrefs({ pageFit })}
                        options={[['fit-page', 'Whole page'], ['fit-width', 'Full width']]} />
           </div>
           <div className={row}>
@@ -497,7 +681,7 @@ function StylePanel({ prefs, fixedLayout }: { prefs: ReadingPrefs; fixedLayout: 
                        options={[['one', 'One'], ['two', 'Two']]} />
           </div>
           <p className="px-3 pb-3 text-xs text-muted">
-            PDFs and comics are fixed pages. For bigger text, pick one page at full width and scroll.
+            Pinch to zoom. On a phone, Text view is easier to read than zoomed pages.
           </p>
         </>
       ) : (<>
