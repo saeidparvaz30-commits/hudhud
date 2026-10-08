@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import type { Book, Change, Pairing, PulledChange } from './types'
+import type { Book, Change, Pairing, PulledChange, SearchResult } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -88,6 +88,30 @@ export async function pullChanges(pairing: Pairing, since: number) {
   const response = await request(pairing, `/sync/pull?since=${since}&limit=500`)
   return (await response.json()) as { changes: PulledChange[]; cursor: number; more: boolean
                                        latest: number }
+}
+
+export async function uploadHighlightImage(pairing: Pairing, highlightId: string,
+                                           blob: Blob): Promise<void> {
+  await request(pairing, `/highlights/${highlightId}/image`, {
+    method: 'PUT',
+    headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+    body: blob,
+  })
+}
+
+export async function fetchHighlightImage(pairing: Pairing, highlightId: string): Promise<Blob> {
+  return (await request(pairing, `/highlights/${highlightId}/image`)).blob()
+}
+
+/** Related highlights, notes and vault passages from other books. 503 while loading. */
+export async function search(pairing: Pairing, text: string, bookId?: string,
+                             k = 6): Promise<SearchResult[]> {
+  const response = await request(pairing, '/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, book_id: bookId ?? null, k }),
+  })
+  return ((await response.json()) as { results: SearchResult[] }).results
 }
 
 export interface Invite { code: string; display: string; url: string; qr_svg: string

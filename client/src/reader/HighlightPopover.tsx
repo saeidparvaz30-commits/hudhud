@@ -11,22 +11,27 @@ export interface PopoverTarget {
   x: number
   top: number
   bottom: number
-  /** A new selection... */
+  /** A new selection (or a tapped picture)... */
   cfi?: string
   text?: string
+  picture?: Element
   /** ...or an existing highlight. */
   existing?: Highlight
 }
 
 interface Props {
   target: PopoverTarget
+  /** How many related notes the hub found for this selection (no chip when none). */
+  relatedCount?: number
+  onRelated?(): void
   onCreate(color: HighlightColor, comment: string): void
   onUpdate(highlight: Highlight, patch: { color?: HighlightColor; comment?: string }): void
   onDelete(highlight: Highlight): void
   onClose(): void
 }
 
-export function HighlightPopover({ target, onCreate, onUpdate, onDelete, onClose }: Props) {
+export function HighlightPopover({ target, relatedCount, onRelated, onCreate, onUpdate, onDelete,
+                                  onClose }: Props) {
   const { existing } = target
   const [noting, setNoting] = useState(Boolean(existing))
   const [comment, setComment] = useState(existing?.comment ?? '')
@@ -67,6 +72,17 @@ export function HighlightPopover({ target, onCreate, onUpdate, onDelete, onClose
       <div ref={box} role="dialog" aria-label={existing ? 'Edit highlight' : 'Highlight selection'}
            style={{ left: pos.left, top: pos.top }}
            className="fixed z-50 w-72 rounded-xl border border-rule bg-raised p-2.5 text-ink shadow-xl">
+        {(target.picture || existing?.kind === 'image') && (
+          <p className="mb-2 truncate px-1 text-xs text-muted" dir="auto">
+            Picture{target.text && target.text !== 'Picture' ? `: ${target.text}` : ''}
+          </p>
+        )}
+        {Boolean(relatedCount) && onRelated && (
+          <button type="button" onClick={onRelated}
+                  className="mb-2 w-full rounded-lg bg-accent/10 px-3 py-1.5 text-start text-sm text-accent hover:bg-accent/20">
+            {relatedCount} related {relatedCount === 1 ? 'note' : 'notes'} in your other books
+          </button>
+        )}
         <div className="flex items-center gap-1.5">
           {COLORS.map((color) => (
             <button key={color} type="button" aria-label={`${color} highlight`} onClick={() => pick(color)}
