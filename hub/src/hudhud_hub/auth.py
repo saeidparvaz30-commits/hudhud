@@ -46,6 +46,8 @@ def pairing_expiry(now: str) -> str:
 
 
 def create_pairing_code(conn: sqlite3.Connection, now: str) -> str:
+    # The desktop app makes a code at every start; spent and expired ones are dropped.
+    conn.execute("DELETE FROM pairing_codes WHERE used = 1 OR expires_at <= ?", (now,))
     code = "".join(secrets.choice(ALPHABET) for _ in range(CODE_LENGTH))
     conn.execute(
         "INSERT INTO pairing_codes (code_hash, expires_at, used) VALUES (?, ?, 0)",

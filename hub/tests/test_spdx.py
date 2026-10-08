@@ -6,7 +6,7 @@ SPDX = "SPDX-License-Identifier: AGPL-3.0-or-later"
 SUFFIXES = {".py", ".sql", ".ipynb", ".ts", ".tsx", ".css"}
 SKIP = {".git", ".venv", ".design", ".planning", "__pycache__", ".ipynb_checkpoints",
         ".pytest_cache", ".ruff_cache", "node_modules", "dist", "public",
-        ".playwright-mcp"}
+        ".playwright-mcp", ".pyinstaller", "target", "gen", "android"}
 
 
 def source_files():

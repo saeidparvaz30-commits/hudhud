@@ -79,3 +79,31 @@ def test_wrong_token_and_revoked_device_are_rejected(conn):
 def test_normalize_accepts_lookalikes():
     assert normalize_code(" abcd-efgo ") == "ABCDEFG0"
     assert normalize_code("il") == "11"
+
+
+def test_expired_codes_are_cleaned_up_when_a_new_one_is_made(conn):
+    create_pairing_code(conn, NOW)
+    create_pairing_code(conn, LATER)  # the first has expired by now
+    assert conn.execute("SELECT COUNT(*) FROM pairing_codes").fetchone()[0] == 1
+
+
+def test_desktop_url_pairs_the_local_window(conn, tmp_path):
+    from hudhud_hub.cli import desktop_url
+    from hudhud_hub.config import load_config
+
+    url = desktop_url(load_config(tmp_path), 8765)
+    assert url.startswith("http://127.0.0.1:8765/?pair=")
+    code = url.rsplit("=", 1)[1]
+    from hudhud_hub.db import connect, utc_now
+    with connect(tmp_path / "hudhud.db") as c:
+        assert redeem_pairing_code(c, code, "Desktop", utc_now())
+
+
+def test_frozen_app_finds_its_bundled_client(tmp_path, monkeypatch):
+    import sys
+
+    from hudhud_hub.config import default_client_dir
+    (tmp_path / "client_dist").mkdir()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert default_client_dir() == tmp_path / "client_dist"

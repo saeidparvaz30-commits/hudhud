@@ -1,5 +1,6 @@
 line-length = 100
 target-version = "py312"
+extend-exclude = ["desktop/.pyinstaller", "client/node_modules", "desktop/node_modules"]
 
 [lint]
 select = ["E", "F", "I", "UP", "B"]
