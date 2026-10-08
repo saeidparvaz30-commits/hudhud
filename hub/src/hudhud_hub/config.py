@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +66,9 @@ def default_data_dir() -> Path:
 
 
 def default_client_dir() -> Path | None:
+    if getattr(sys, "frozen", False):  # the packaged hudhud.exe carries the reader with it
+        bundled = Path(getattr(sys, "_MEIPASS", "")) / "client_dist"
+        return bundled if bundled.is_dir() else None
     candidate = Path(__file__).resolve().parents[3] / "client" / "dist"
     return candidate if candidate.is_dir() else None
 

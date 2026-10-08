@@ -34,6 +34,14 @@ def print_pairing(config: Config, code: str) -> None:
         print("(this terminal cannot draw the QR code; use the link above)")
 
 
+def desktop_url(config: Config, port: int) -> str:
+    """The address the desktop app opens: this hub, carrying a fresh one-time code so the
+    window pairs itself (an already paired window ignores it)."""
+    with closing(_open(config)) as conn:
+        code = create_pairing_code(conn, utc_now())
+    return pairing_url(f"http://127.0.0.1:{port}", code)
+
+
 def cmd_serve(config: Config, args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -45,8 +53,11 @@ def cmd_serve(config: Config, args: argparse.Namespace) -> int:
         print("No vault_path set: highlights sync but are not written to Obsidian yet.")
     app = create_app(config)
     port = args.port or config.port
+    if args.announce:
+        # Read by the desktop app; it opens this once /health answers.
+        print(f"HUDHUD_URL {desktop_url(config, port)}", flush=True)
     with closing(_open(config)) as conn:
-        if not list_devices(conn):
+        if not list_devices(conn) and not args.announce:
             code = create_pairing_code(conn, utc_now())
             print_pairing(config, code)
             if config.client_dir is not None and not args.no_browser:
@@ -62,6 +73,9 @@ def cmd_serve(config: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_pair(config: Config, args: argparse.Namespace) -> int:
+    if args.announce:
+        print(f"HUDHUD_URL {desktop_url(config, args.port or config.port)}", flush=True)
+        return 0
     with closing(_open(config)) as conn:
         print_pairing(config, create_pairing_code(conn, utc_now()))
     return 0
@@ -88,7 +102,12 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--port", type=int)
     serve.add_argument("--no-browser", action="store_true",
                        help="do not open the reader on first start (headless hubs)")
-    sub.add_parser("pair", help="print a new pairing code")
+    serve.add_argument("--announce", action="store_true",
+                       help="print a self-pairing URL for the desktop app (HUDHUD_URL ...)")
+    pair = sub.add_parser("pair", help="print a new pairing code")
+    pair.add_argument("--announce", action="store_true",
+                      help="print a self-pairing URL for the desktop app (HUDHUD_URL ...)")
+    pair.add_argument("--port", type=int)
     sub.add_parser("devices", help="list paired devices")
     args = parser.parse_args(argv)
     config = load_config(args.data_dir)

@@ -17,3 +17,10 @@ __pycache__/
 # Android release keys (never commit)
 *.jks
 *.keystore
+
+# Desktop app build outputs
+desktop/node_modules/
+desktop/.pyinstaller/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/binaries/

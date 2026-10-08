@@ -20,6 +20,13 @@ export default function App() {
 
   useEffect(() => (paired ? startAutoSync() : undefined), [paired])
 
+  useEffect(() => {
+    // The desktop app opens with a fresh pairing code each start; once paired, drop it.
+    if (paired && new URLSearchParams(window.location.search).has('pair')) {
+      window.history.replaceState(null, '', window.location.pathname)
+    }
+  }, [paired])
+
   if (pairing === undefined) return null
   return (
     <>

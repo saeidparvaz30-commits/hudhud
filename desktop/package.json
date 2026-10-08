@@ -1,0 +1,14 @@
+{
+  "name": "hudhud-desktop",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "tauri": "tauri",
+    "sidecar": "uv run --project ../hub --with pyinstaller python build_sidecar.py",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.1"
+  }
+}

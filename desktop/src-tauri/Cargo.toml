@@ -1,0 +1,26 @@
+[package]
+name = "hudhud-desktop"
+version = "0.1.0"
+description = "Hudhud for desktop: the reader with its hub built in"
+authors = ["Saeid Sheikhi"]
+license = "AGPL-3.0-or-later"
+edition = "2021"
+
+[lib]
+name = "hudhud_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
