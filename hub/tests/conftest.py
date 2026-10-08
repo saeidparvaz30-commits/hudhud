@@ -4,6 +4,7 @@ import pytest
 
 from hudhud_hub.config import Config
 from hudhud_hub.db import MIGRATIONS, apply_migrations, connect, insert_book
+from hudhud_hub.embedder import HashEmbedder
 
 
 def pdf_bytes(title: str = "Paper Title", author: str = "P. Author", text: str = "Hello") -> bytes:
@@ -39,3 +40,9 @@ def book(conn) -> str:
                        "format": "epub", "file_size": 1, "cover_path": None},
                 "2026-10-08T09:00:00.000Z")
     return BOOK_ID
+
+
+@pytest.fixture(autouse=True)
+def no_model_downloads(monkeypatch):
+    """Tests never fetch the real embedding model: the default index uses word hashing."""
+    monkeypatch.setattr("hudhud_hub.search.FastEmbedder", HashEmbedder)

@@ -33,8 +33,10 @@ from .auth import (
 )
 from .config import Config
 from .db import MIGRATIONS, apply_migrations, connect, insert_book, new_ulid, utc_now
+from .images import MAX_IMAGE_BYTES, image_path, save_image
 from .library import MAX_BYTES, ImportRejected, import_book
-from .sync import book_payload, get_book_row, pull, push, record_book_import
+from .search import SearchIndex
+from .sync import ULID_RE, book_payload, get_book_row, pull, push, record_book_import
 from .vault_writer import VaultWriter
 
 SOURCE_URL = "https://github.com/saeidparvaz30-commits/hudhud"
@@ -62,20 +64,27 @@ class PushRequest(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=20_000)
     book_id: str | None = None
-    k: int = 5
+    k: int = Field(default=5, ge=1, le=20)
 
 
-def create_app(config: Config, vault_writer: VaultWriter | None = None) -> FastAPI:
+def create_app(config: Config, vault_writer: VaultWriter | None = None,
+               search_index: SearchIndex | None = None) -> FastAPI:
     config.library_dir.mkdir(parents=True, exist_ok=True)
     with closing(connect(config.db_path)) as conn:
         apply_migrations(conn, MIGRATIONS)
     writer = vault_writer or VaultWriter(config)
+    index = search_index
+    if index is None:
+        # Loads the model and catches up in the background; /search answers 503 until then.
+        index = SearchIndex(config)
+        index.start()
 
     app = FastAPI(title="Hudhud hub", version=__version__)
     app.state.config = config
     app.state.vault = writer
+    app.state.search = index
     # Rule R1: the client may be served from anywhere. Auth is a bearer token, never a
     # cookie, so an open CORS policy grants nothing without the token.
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
@@ -107,8 +116,9 @@ def create_app(config: Config, vault_writer: VaultWriter | None = None) -> FastA
 
     @app.get("/health")
     def health() -> dict:
-        return {"ok": True, "version": __version__, "search_ready": False,
-                "vault_enabled": writer.enabled, "vault_ok": writer.ok()}
+        return {"ok": True, "version": __version__, "search_ready": index.ready,
+                "search_error": index.error, "vault_enabled": writer.enabled,
+                "vault_ok": writer.ok()}
 
     @app.get("/about")
     def about() -> dict:
@@ -201,6 +211,7 @@ def create_app(config: Config, vault_writer: VaultWriter | None = None) -> FastA
         results, touched = push(conn, device, body.changes, utc_now())
         for book_id in touched:
             writer.schedule(book_id)
+            index.enqueue_book(book_id)
         return {"results": results}
 
     @app.get("/sync/pull")
@@ -208,9 +219,45 @@ def create_app(config: Config, vault_writer: VaultWriter | None = None) -> FastA
                   limit: Annotated[int, Query(ge=1, le=1000)] = 500) -> dict:
         return pull(conn, since, limit)
 
-    @app.post("/search")
-    def search(body: SearchRequest, device: Device) -> JSONResponse:
-        return JSONResponse({"detail": "search is not available yet"}, status_code=503)
+    @app.post("/search", response_model=None)
+    def search(body: SearchRequest, device: Device) -> JSONResponse | dict:
+        if not index.ready:
+            detail = index.error or "search is still starting (the model loads on first use)"
+            return JSONResponse({"detail": detail}, status_code=503)
+        return {"results": index.search(body.text, body.book_id, body.k)}
+
+    def picture_highlight(conn: sqlite3.Connection, highlight_id: str):
+        row = conn.execute("SELECT book_id, kind FROM highlights WHERE id = ? AND deleted = 0",
+                           (highlight_id,)).fetchone() if ULID_RE.fullmatch(highlight_id) else None
+        if row is None or row["kind"] != "image":
+            raise HTTPException(404, "no such picture highlight")
+        return row
+
+    @app.put("/highlights/{highlight_id}/image")
+    async def upload_image(highlight_id: str, request: Request, conn: Conn, device: Device,
+                           content_length: Annotated[int | None, Header()] = None) -> dict:
+        row = picture_highlight(conn, highlight_id)
+        if content_length is not None and content_length > MAX_IMAGE_BYTES:
+            raise HTTPException(413, "pictures are limited to 8 MB")
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > MAX_IMAGE_BYTES:
+                raise HTTPException(413, "pictures are limited to 8 MB")
+        try:
+            save_image(config, highlight_id, bytes(data))
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        writer.schedule(row["book_id"])
+        return {"saved": highlight_id}
+
+    @app.get("/highlights/{highlight_id}/image")
+    def get_image(highlight_id: str, conn: Conn, device: Device) -> FileResponse:
+        picture_highlight(conn, highlight_id)
+        path = image_path(config, highlight_id)
+        if path is None:
+            raise HTTPException(404, "the picture has not been uploaded yet")
+        return FileResponse(path, headers=IMMUTABLE)
 
     if config.client_dir is not None:
         _mount_client(app, config.client_dir)

@@ -38,6 +38,7 @@ class Highlight:
     comment: str
     fraction: float
     created_at: str
+    image: str | None = None  # file name in the attachments folder, for picture highlights
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,8 @@ def render_frontmatter(book: BookMeta) -> str:
 
 def _render_highlight(book_id: str, h: Highlight, hub_url: str) -> str:
     quote = "\n".join(f"> {line}".rstrip() for line in _escape(h.text).strip().splitlines())
-    parts = [quote, "", f"^{block_id(h.id)}", ""]
+    parts = [f"![[{h.image}]]", "", quote] if h.image else [quote]
+    parts += ["", f"^{block_id(h.id)}", ""]
     if h.comment.strip():
         parts.append(f"*Comment:* {' '.join(_escape(h.comment).split())}")
     link = f"{hub_url.rstrip('/')}/read/{book_id}?h={h.id.upper()}"

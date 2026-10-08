@@ -19,7 +19,8 @@ MAX_LOCATOR = 4_000
 BOOK_COLUMNS = ("id", "title", "author", "language", "format", "file_size", "cover_path",
                 "added_at", "updated_at", "deleted")
 HIGHLIGHT_COLUMNS = ("id", "book_id", "locator", "fraction", "text", "color", "comment",
-                     "created_at", "updated_at", "device_id", "deleted")
+                     "created_at", "updated_at", "device_id", "deleted", "kind")
+KINDS = {"text", "image"}
 
 
 class Rejected(Exception):
@@ -126,9 +127,12 @@ def _apply_highlight(conn, device_id: str, op: str, data: dict, now: str) -> tup
             "created_at": _timestamp(data, "created_at"),
             "updated_at": updated_at,
             "device_id": device_id,
+            "kind": data.get("kind", "text"),
         }
         if record["color"] not in COLORS:
             raise Rejected(f"color must be one of {sorted(COLORS)}")
+        if record["kind"] not in KINDS:
+            raise Rejected("kind must be text or image")
         if existing is not None:
             current = highlight_payload(existing)
             if current["book_id"] != book_id:
@@ -139,9 +143,9 @@ def _apply_highlight(conn, device_id: str, op: str, data: dict, now: str) -> tup
                 return "ignored", book_id
         conn.execute(
             "INSERT INTO highlights (id, book_id, locator, fraction, text, color, comment, "
-            "created_at, updated_at, device_id, deleted) "
+            "created_at, updated_at, device_id, deleted, kind) "
             "VALUES (:id, :book_id, :locator, :fraction, :text, :color, :comment, "
-            ":created_at, :updated_at, :device_id, 0) "
+            ":created_at, :updated_at, :device_id, 0, :kind) "
             "ON CONFLICT (id) DO UPDATE SET locator = excluded.locator, "
             "fraction = excluded.fraction, text = excluded.text, color = excluded.color, "
             "comment = excluded.comment, updated_at = excluded.updated_at, "

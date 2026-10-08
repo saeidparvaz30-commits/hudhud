@@ -41,7 +41,7 @@ def test_connect_pragmas(tmp_path):
 
 def test_fresh_database_gets_every_table():
     conn = connect(":memory:")
-    assert apply_migrations(conn, MIGRATIONS) == [1, 2]
+    assert apply_migrations(conn, MIGRATIONS) == [1, 2, 3]
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"books", "progress", "highlights", "devices", "changes", "chunks",
             "schema_version"} <= tables
@@ -50,7 +50,7 @@ def test_fresh_database_gets_every_table():
 def test_migrations_are_idempotent():
     conn = migrated()
     assert apply_migrations(conn, MIGRATIONS) == []
-    assert schema_version(conn) == 2
+    assert schema_version(conn) == 3
 
 
 def test_failed_migration_rolls_back(tmp_path):
