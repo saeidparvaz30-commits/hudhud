@@ -1,0 +1,10 @@
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[lint.per-file-ignores]
+# Given cells import what Saeid's stubs will need (F401); test cells re-import
+# pytest (F811); golden strings and links run long (E501).
+"notebooks/*.ipynb" = ["E402", "E501", "F401", "F811"]
