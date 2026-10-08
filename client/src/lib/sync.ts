@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { ApiError, pullChanges, pushChanges } from './api'
+import { ApiError, pullChanges, pushChanges, uploadHighlightImage } from './api'
 import { db, getCursor, getPairing, resetSyncedData, setCursor } from './db'
 import { mergeHighlight } from './merge'
 import { notify } from './notices'
@@ -83,6 +83,27 @@ export async function applyRemote(changes: PulledChange[]): Promise<void> {
   await tx.done
 }
 
+/** Upload pictures for picture highlights the hub already has (after the push). */
+async function uploadPictures(pairing: Pairing): Promise<void> {
+  const d = await db()
+  for (const id of await d.getAllKeys('images')) {
+    const entry = await d.get('images', id)
+    if (!entry || entry.uploaded) continue
+    try {
+      await uploadHighlightImage(pairing, id, entry.blob)
+      await d.put('images', { ...entry, uploaded: true }, id)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) continue  // highlight deleted or unknown
+      if (e instanceof ApiError && e.status === 422) {
+        notify('The hub could not read a highlighted picture, so it was not saved.')
+        await d.put('images', { ...entry, uploaded: true }, id)
+        continue
+      }
+      throw e
+    }
+  }
+}
+
 async function pullAll(pairing: Pairing): Promise<boolean> {
   let cursor = await getCursor()
   let changed = false
@@ -114,6 +135,7 @@ async function runOnce(keepalive: boolean): Promise<void> {
   setState('syncing')
   try {
     await pushOutbox(pairing, keepalive)
+    if (!keepalive) await uploadPictures(pairing)
     if (!keepalive && await pullAll(pairing)) notifyData()
     backoff = 0
     setState('idle')

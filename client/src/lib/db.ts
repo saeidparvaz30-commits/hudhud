@@ -11,13 +11,19 @@ interface HudhudDB extends DBSchema {
   highlights: { key: string; value: Highlight; indexes: { by_book: string } }
   outbox: { key: number; value: Change }
   meta: { key: string; value: unknown }
+  /** Pictures for picture highlights; `uploaded` turns true once the hub has it. */
+  images: { key: string; value: { blob: Blob; uploaded: boolean } }
 }
 
 let dbPromise: Promise<IDBPDatabase<HudhudDB>> | null = null
 
 export function db(): Promise<IDBPDatabase<HudhudDB>> {
-  dbPromise ??= openDB<HudhudDB>('hudhud', 1, {
-    upgrade(d) {
+  dbPromise ??= openDB<HudhudDB>('hudhud', 2, {
+    upgrade(d, oldVersion) {
+      if (oldVersion >= 1) {
+        d.createObjectStore('images')
+        return
+      }
       d.createObjectStore('books', { keyPath: 'id' })
       d.createObjectStore('files')
       d.createObjectStore('covers')
@@ -26,6 +32,7 @@ export function db(): Promise<IDBPDatabase<HudhudDB>> {
       d.createObjectStore('highlights', { keyPath: 'id' }).createIndex('by_book', 'book_id')
       d.createObjectStore('outbox', { autoIncrement: true })
       d.createObjectStore('meta')
+      d.createObjectStore('images')
     },
   })
   return dbPromise
@@ -94,7 +101,7 @@ export async function resetSyncedData(): Promise<void> {
 export async function clearAll(): Promise<void> {
   const d = await db()
   for (const store of ['books', 'files', 'covers', 'progress', 'highlights', 'outbox',
-                       'meta'] as const) {
+                       'meta', 'images'] as const) {
     await d.clear(store)
   }
 }

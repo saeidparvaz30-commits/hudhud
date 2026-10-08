@@ -2,20 +2,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Icon, IconButton } from '../components/Icon'
-import { createHighlight, deleteHighlight, getBookFile, saveProgress,
+import { createHighlight, deleteHighlight, getBookFile, getHighlightImageUrl, saveProgress,
          updateHighlight } from '../lib/actions'
-import { listDevices } from '../lib/api'
+import { listDevices, search } from '../lib/api'
 import { notify } from '../lib/notices'
 import { bookHighlights, bookProgress, db, getBook, getPairing } from '../lib/db'
 import { navigate, type ReadingPrefs, setPrefs, type Theme, useLive, usePrefs } from '../lib/hooks'
 import { dataChanged, syncNow } from '../lib/sync'
 import { shouldOfferResume } from '../lib/merge'
-import type { Book, Highlight, HighlightColor, Progress } from '../lib/types'
+import { ApiError } from '../lib/api'
+import type { Book, Highlight, HighlightColor, Progress, SearchResult } from '../lib/types'
 import { bookCss, type FoliateView, HIGHLIGHT_CSS, loadFoliate, type RelocateDetail,
          type TocItem, toFoliateFile } from './foliate'
 import { HighlightPopover, type PopoverTarget } from './HighlightPopover'
 import { drawableLocator, navigationTarget, sectionCfi, storedLocator } from './locators'
 import { pdfToFb2 } from './pdfText'
+import { pictureAt, pictureBlob, pictureCaption } from './pictures'
+import { linkFor, type RelatedState } from './related'
+import { RelatedPanel } from './RelatedPanel'
 
 const THEME_COLORS: Record<Theme, { paper: string; ink: string; accent: string
                                     selection: string }> = {
@@ -25,7 +29,12 @@ const THEME_COLORS: Record<Theme, { paper: string; ink: string; accent: string
 }
 
 type Overlayer = { highlight: unknown }
-type Panel = null | 'toc' | 'highlights' | 'style'
+type Panel = null | 'toc' | 'highlights' | 'style' | 'related'
+
+const searchErrorText = (e: unknown) =>
+  e instanceof ApiError && e.status === 503
+    ? 'Search is still getting ready (the first start downloads its model). Try again in a minute.'
+    : 'Search needs the hub. It is not reachable right now.'
 type PdfView = 'page' | 'text'
 
 const TEXT_VIEW_CACHE = (id: string) => `${id}:text-v2`  // v2: with figures
@@ -204,6 +213,9 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
   const [popover, setPopover] = useState<PopoverTarget | null>(null)
   const [resume, setResume] = useState<{ progress: Progress; device: string } | null>(null)
   const [chrome, setChrome] = useState(true)
+  const [related, setRelated] = useState<RelatedState | null>(null)
+  const [chip, setChip] = useState<{ text: string; results: SearchResult[] } | null>(null)
+  const linkTarget = useRef<PopoverTarget | null>(null)
 
   prefsRef.current = prefs
 
@@ -301,6 +313,16 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
             return
           }
           if (!doc.getSelection()?.isCollapsed) return
+          const picture = pictureAt(e.target)
+          if (picture && view) {
+            // Tapping a picture offers to highlight it and write a note about it.
+            const range = doc.createRange()
+            range.selectNode(picture)
+            const cfi = view.getCFI(index, range)
+            openPopover(doc, range, { cfi: storedLocator(cfi, isText), text: pictureCaption(picture),
+                                      picture })
+            return
+          }
           if ((e.target as Element | null)?.closest?.('a')) return
           const { left, scale } = frameOffset(doc)
           const box = container.getBoundingClientRect()
@@ -480,17 +502,77 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
     }
   }
 
-  async function onCreate(color: HighlightColor, comment: string) {
-    const target = popover
-    setPopover(null)
-    if (!target?.cfi || !target.text) return
+  async function highlightTarget(target: PopoverTarget, color: HighlightColor, comment: string) {
+    if (!target.cfi || !target.text) return
     try {
+      const image = target.picture ? await pictureBlob(target.picture) : undefined
       await createHighlight({ bookId, locator: target.cfi, text: target.text, color, comment,
-                              fraction: viewRef.current?.lastLocation?.fraction ?? 0 })
+                              fraction: viewRef.current?.lastLocation?.fraction ?? 0,
+                              kind: target.picture ? 'image' : 'text', image })
     } catch (e) {
       notify(e instanceof Error ? e.message : String(e))
     }
+  }
+
+  async function onCreate(color: HighlightColor, comment: string) {
+    const target = popover
+    setPopover(null)
+    if (target) await highlightTarget(target, color, comment)
     clearSelections()
+  }
+
+  // Spec 10.3: once a selection settles (4+ words), ask the hub for related notes.
+  useEffect(() => {
+    setChip(null)
+    const text = popover && !popover.existing ? popover.text : undefined
+    if (!text || text.split(/\s+/).length < 4) return
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      const pairing = await getPairing()
+      if (!pairing) return
+      try {
+        const results = await search(pairing, text, bookId)
+        if (!cancelled) setChip({ text, results })
+      } catch {
+        /* offline, or the model is still loading: no chip */
+      }
+    }, 400)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [popover, bookId])
+
+  function showChipResults() {
+    if (!chip) return
+    linkTarget.current = popover
+    setRelated({ query: chip.text, results: chip.results, canLink: true })
+    setPopover(null)
+    setPanel('related')
+  }
+
+  async function relatedFor(h: Highlight) {
+    const query = [h.text, h.comment].filter(Boolean).join('\n')
+    linkTarget.current = null
+    setRelated({ query, results: null, canLink: false })
+    setPanel('related')
+    try {
+      const pairing = await getPairing()
+      if (!pairing) return
+      setRelated({ query, results: await search(pairing, query, bookId), canLink: false })
+    } catch (e) {
+      setRelated({ query, results: [], canLink: false, error: searchErrorText(e) })
+    }
+  }
+
+  async function linkTo(result: SearchResult) {
+    const target = linkTarget.current
+    if (!target) return
+    await highlightTarget(target, 'blue', linkFor(result))
+    linkTarget.current = null
+    setRelated((r) => (r ? { ...r, canLink: false } : r))
+    clearSelections()
+    notify(`Linked to ${result.book_title ?? result.path}. The link is in the new highlight's note.`)
   }
 
   async function onUpdate(h: Highlight, patch: { color?: HighlightColor; comment?: string }) {
@@ -553,7 +635,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
           <aside className="absolute inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col border-l border-rule bg-raised shadow-xl">
             <div className="flex items-center justify-between border-b border-rule px-4 py-2">
               <h2 className="font-medium">
-                {{ toc: 'Contents', highlights: 'Highlights', style: 'Reading' }[panel]}
+                {{ toc: 'Contents', highlights: 'Highlights', style: 'Reading',
+                   related: 'Related' }[panel]}
               </h2>
               <IconButton icon="close" label="Close" onClick={() => setPanel(null)} />
             </div>
@@ -566,7 +649,11 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
                   void viewRef.current?.goTo(navigationTarget(h.locator, textMode.current))
                   setPanel(null)
                 }}
-                onDelete={(h) => void deleteHighlight(h)} />}
+                onDelete={(h) => void deleteHighlight(h)}
+                onRelated={(h) => void relatedFor(h)} />}
+              {panel === 'related' && related && (
+                <RelatedPanel state={related} onLink={(r) => void linkTo(r)} />
+              )}
               {panel === 'style' && <StylePanel prefs={prefs}
                                                 fixedLayout={viewRef.current?.isFixedLayout ?? false}
                                                 pdfView={book?.format === 'pdf' ? pdfView : null}
@@ -593,6 +680,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
       </footer>
 
       {popover && <HighlightPopover target={popover} onCreate={(c, n) => void onCreate(c, n)}
+                                    relatedCount={chip && chip.text === popover.text ? chip.results.length : 0}
+                                    onRelated={showChipResults}
                                     onUpdate={(h, p) => void onUpdate(h, p)}
                                     onDelete={(h) => void onDelete(h)}
                                     onClose={() => { setPopover(null); clearSelections() }} />}
@@ -600,11 +689,17 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
   )
 }
 
-function HighlightItem({ h, onPick, onDelete }: {
+function HighlightItem({ h, onPick, onDelete, onRelated }: {
   h: Highlight; onPick(h: Highlight): void; onDelete(h: Highlight): void
+  onRelated(h: Highlight): void
 }) {
   const [editing, setEditing] = useState(false)
   const [note, setNote] = useState(h.comment)
+  const [picture, setPicture] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (h.kind === 'image') void getHighlightImageUrl(h).then(setPicture)
+  }, [h])
 
   async function save() {
     setEditing(false)
@@ -614,6 +709,9 @@ function HighlightItem({ h, onPick, onDelete }: {
   return (
     <li className="rounded-lg hover:bg-ink/5">
       <button type="button" onClick={() => onPick(h)} className="block w-full p-3 pb-1 text-start">
+        {h.kind === 'image' && (picture
+          ? <img src={picture} alt="" className="mb-2 max-h-40 rounded-md border border-rule object-contain" />
+          : <p className="mb-1 text-xs text-muted">Picture</p>)}
         <p className="border-s-4 ps-2 font-serif text-sm leading-relaxed line-clamp-4" dir="auto"
            style={{ borderColor: HIGHLIGHT_CSS[h.color] }}>{h.text}</p>
         {h.comment && !editing && (
@@ -637,6 +735,7 @@ function HighlightItem({ h, onPick, onDelete }: {
         <div className="flex gap-4 px-3 pb-2 text-xs">
           <button type="button" onClick={() => { setNote(h.comment); setEditing(true) }}
                   className="text-accent">{h.comment ? 'Edit note' : 'Add note'}</button>
+          <button type="button" onClick={() => onRelated(h)} className="text-accent">Related</button>
           <button type="button" onClick={() => onDelete(h)}
                   className="text-red-700 opacity-70 hover:opacity-100">Delete</button>
         </div>
@@ -645,15 +744,17 @@ function HighlightItem({ h, onPick, onDelete }: {
   )
 }
 
-function HighlightList({ highlights, onPick, onDelete }: {
+function HighlightList({ highlights, onPick, onDelete, onRelated }: {
   highlights: Highlight[]; onPick(h: Highlight): void; onDelete(h: Highlight): void
+  onRelated(h: Highlight): void
 }) {
   if (!highlights.length) {
-    return <p className="p-3 text-sm text-muted">Select text in the book to highlight it.</p>
+    return <p className="p-3 text-sm text-muted">Select text, or tap a picture, to highlight it.</p>
   }
   return (
     <ul className="space-y-1">
-      {highlights.map((h) => <HighlightItem key={h.id} h={h} onPick={onPick} onDelete={onDelete} />)}
+      {highlights.map((h) => <HighlightItem key={h.id} h={h} onPick={onPick} onDelete={onDelete}
+                                            onRelated={onRelated} />)}
     </ul>
   )
 }

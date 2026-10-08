@@ -113,6 +113,16 @@ def test_vault_notes_are_searched_but_managed_regions_are_not(library, index):
     assert results[0]["obsidian_url"].startswith("obsidian://open?vault=vault&file=")
 
 
+def test_hudhud_book_notes_add_nothing_but_your_own_words():
+    from hudhud_hub.vault import INTRO
+    generated = "\n".join([
+        "# Thinking, Fast and Slow", "", INTRO, "",
+        "<!-- hudhud:start (x) -->", "> q", "<!-- hudhud:end -->", ""])
+    assert vault_chunks(generated) == []
+    assert vault_chunks(generated + "\nMy own thought.\n") == [
+        ("Thinking, Fast and Slow", "Thinking, Fast and Slow\nMy own thought.")]
+
+
 def test_vault_chunks_split_by_heading_and_drop_frontmatter():
     chunks = vault_chunks("---\na: 1\n---\nIntro line.\n\n## Part two\n\nSecond part text.\n")
     assert chunks == [("", "Intro line."), ("Part two", "Part two\nSecond part text.")]

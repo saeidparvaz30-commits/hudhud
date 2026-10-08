@@ -16,6 +16,9 @@ export interface Book {
 
 export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple'
 
+/** 'image' is a picture highlight: `text` holds its caption, the picture is stored apart. */
+export type HighlightKind = 'text' | 'image'
+
 export interface Highlight {
   id: string
   book_id: string
@@ -28,6 +31,7 @@ export interface Highlight {
   updated_at: string
   device_id: string
   deleted: boolean
+  kind?: HighlightKind
 }
 
 export interface Progress {
@@ -51,6 +55,20 @@ export interface PulledChange extends Change {
   entity_id: string
   device_id: string
   ts: string
+}
+
+/** One related passage found by the hub's semantic search. */
+export interface SearchResult {
+  kind: 'highlight' | 'vault'
+  match: 'text' | 'note' | 'vault'
+  score: number
+  text: string
+  book_id: string | null
+  book_title: string | null
+  highlight: (Pick<Highlight, 'id' | 'book_id' | 'locator' | 'fraction' | 'text' | 'comment'
+                         | 'color'> & { kind: HighlightKind }) | null
+  path: string | null
+  obsidian_url: string | null
 }
 
 export interface Pairing {

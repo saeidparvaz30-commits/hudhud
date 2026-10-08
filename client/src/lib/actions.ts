@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { fetchBookFile, fetchCover, uploadBook } from './api'
+import { fetchBookFile, fetchCover, fetchHighlightImage, uploadBook } from './api'
 import { commitLocal, db, getPairing } from './db'
 import { ulid, utcNow } from './ids'
 import { notifyData, syncNow } from './sync'
-import type { Book, Highlight, HighlightColor, Pairing } from './types'
+import type { Book, Highlight, HighlightColor, HighlightKind, Pairing } from './types'
 
 // The hub's limits (sync.py MAX_TEXT, MAX_LOCATOR): checked here so nothing is lost later.
 const MAX_HIGHLIGHT_TEXT = 20_000
@@ -26,7 +26,8 @@ export async function saveProgress(bookId: string, locator: string, fraction: nu
 
 export async function createHighlight(input: { bookId: string; locator: string; fraction: number
                                                text: string; color: HighlightColor
-                                               comment?: string }): Promise<Highlight> {
+                                               comment?: string; kind?: HighlightKind
+                                               image?: Blob }): Promise<Highlight> {
   const text = input.text.trim()
   if (text.length > MAX_HIGHLIGHT_TEXT || input.locator.length > MAX_LOCATOR) {
     throw new Error('That selection is too long to highlight. Try a shorter passage.')
@@ -37,10 +38,14 @@ export async function createHighlight(input: { bookId: string; locator: string; 
     id: ulid(), book_id: input.bookId, locator: input.locator,
     fraction: Math.min(1, Math.max(0, input.fraction)), text,
     color: input.color, comment: input.comment ?? '', created_at: now, updated_at: now,
-    device_id: pairing.deviceId, deleted: false,
+    device_id: pairing.deviceId, deleted: false, kind: input.kind ?? 'text',
   }
   await commitLocal({ entity: 'highlight', op: 'upsert', data: { ...highlight } },
                     (tx) => tx.objectStore('highlights').put(highlight))
+  if (input.image) {
+    // Kept on the device first; sync uploads it once the hub knows the highlight.
+    await (await db()).put('images', { blob: input.image, uploaded: false }, highlight.id)
+  }
   notifyData()
   void syncNow()  // spec 8: sync immediately after creating a highlight
   return highlight
@@ -107,6 +112,28 @@ export async function getBookFile(book: Book): Promise<Blob> {
   const blob = await fetchBookFile(await requirePairing(), book.id)
   await d.put('files', blob, book.id)
   return blob
+}
+
+const pictureUrls = new Map<string, string>()
+
+/** A picture highlight's image: from this device, else fetched once from the hub. */
+export async function getHighlightImageUrl(highlight: Highlight): Promise<string | null> {
+  if (highlight.kind !== 'image') return null
+  const known = pictureUrls.get(highlight.id)
+  if (known) return known
+  const d = await db()
+  let blob = (await d.get('images', highlight.id))?.blob
+  if (!blob) {
+    try {
+      blob = await fetchHighlightImage(await requirePairing(), highlight.id)
+      await d.put('images', { blob, uploaded: true }, highlight.id)
+    } catch {
+      return null
+    }
+  }
+  const url = URL.createObjectURL(blob)
+  pictureUrls.set(highlight.id, url)
+  return url
 }
 
 const coverUrls = new Map<string, string>()

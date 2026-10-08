@@ -25,7 +25,7 @@ import numpy as np
 from .config import Config
 from .db import connect, utc_now
 from .embedder import Embedder, FastEmbedder
-from .vault import END, START_PREFIX
+from .vault import END, INTRO, START_PREFIX
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ def vault_chunks(markdown: str) -> list[tuple[str, str]]:
     """(heading, chunk text) pairs: frontmatter and managed regions removed, split by
     heading, long sections split on paragraph boundaries."""
     text = _strip_managed(_FRONTMATTER.sub("", markdown.replace("\r\n", "\n"), count=1))
+    text = text.replace(INTRO, "")  # the line Hudhud writes into every book note
     sections: list[tuple[str, list[str]]] = [("", [])]
     for line in text.split("\n"):
         match = _HEADING.match(line)

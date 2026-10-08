@@ -19,8 +19,9 @@ _KNOWN = {"vault_path", "vault_subfolder", "host", "port", "public_url", "client
 _RESERVED: set[str] = set()
 # Multilingual (about 50 languages, Persian included) and small enough for any CPU.
 DEFAULT_EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-# Measured on Farsi/English pairs: translations ~0.75, related ideas 0.42-0.55, unrelated ~0.
-DEFAULT_THRESHOLD = 0.35
+# Measured: translations ~0.75, paraphrases ~0.5, a note interpreting a passage ~0.3,
+# unrelated text 0 to 0.2.
+DEFAULT_THRESHOLD = 0.28
 
 TEMPLATE = """\
 # Hudhud hub settings. Uncomment and edit, then restart `hudhud serve`.
@@ -39,7 +40,7 @@ TEMPLATE = """\
 # Semantic search: the embedding model (downloaded on first start) and how similar a
 # note must be to count as related (0 to 1).
 # embed_model = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-# similarity_threshold = 0.35
+# similarity_threshold = 0.28
 """
 
 
