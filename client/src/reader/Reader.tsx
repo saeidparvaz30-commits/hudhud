@@ -28,7 +28,7 @@ type Overlayer = { highlight: unknown }
 type Panel = null | 'toc' | 'highlights' | 'style'
 type PdfView = 'page' | 'text'
 
-const TEXT_VIEW_CACHE = (id: string) => `${id}:text-v1`
+const TEXT_VIEW_CACHE = (id: string) => `${id}:text-v2`  // v2: with figures
 const viewKey = (id: string) => `hudhud.view.${id}`
 
 /** Phones get the reflowed text view by default; a choice per book is remembered. */
