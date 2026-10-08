@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import threading
 from pathlib import Path
 
 from .config import Config
 from .db import connect, utc_now
-from .vault import BookMeta, Highlight, write_book_note
+from .images import image_path
+from .vault import BookMeta, Highlight, safe_join, write_book_note
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +58,18 @@ class VaultWriter:
             self._timers.pop(book_id, None)
         self.write_now(book_id)
 
+    def _attach(self, highlight_id: str) -> str | None:
+        """Copy a picture highlight's image into <vault>/<subfolder>/attachments."""
+        source = image_path(self.config, highlight_id)
+        if source is None:
+            return None
+        name = f"h-{highlight_id.lower()}{source.suffix}"
+        target = safe_join(self.config.vault_path, self.config.vault_subfolder, "attachments", name)
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+        return name
+
     def write_now(self, book_id: str) -> Path | None:
         if not self.enabled:
             return None
@@ -68,9 +82,10 @@ class VaultWriter:
             if book is None:
                 return None
             highlights = [
-                Highlight(r["id"], r["text"], r["comment"], r["fraction"], r["created_at"])
+                Highlight(r["id"], r["text"], r["comment"], r["fraction"], r["created_at"],
+                          self._attach(r["id"]) if r["kind"] == "image" else None)
                 for r in conn.execute(
-                    "SELECT id, text, comment, fraction, created_at FROM highlights "
+                    "SELECT id, text, comment, fraction, created_at, kind FROM highlights "
                     "WHERE book_id = ? AND deleted = 0",
                     (book_id,),
                 )

@@ -37,7 +37,7 @@ def upload(client, auth, data=None, name="book.pdf"):
 
 
 def test_public_endpoints(client):
-    assert client.get("/health").json()["search_ready"] is False
+    assert "search_ready" in client.get("/health").json()
     assert client.get("/about").json()["license"] == "AGPL-3.0-or-later"
 
 
@@ -120,9 +120,6 @@ def test_devices_and_revoke(client, config):
     assert client.get("/books", headers=other).status_code == 401
 
 
-def test_search_is_503_until_it_ships(client, config):
-    auth = pair(client, config)
-    assert client.post("/search", headers=auth, json={"text": "x"}).status_code == 503
 
 
 def test_static_client_with_spa_fallback(config, tmp_path):

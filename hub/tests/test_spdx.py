@@ -11,7 +11,10 @@ SKIP = {".git", ".venv", ".design", ".planning", "__pycache__", ".ipynb_checkpoi
 
 def source_files():
     for p in ROOT.rglob("*"):
-        if p.is_file() and p.suffix in SUFFIXES and not set(p.relative_to(ROOT).parts) & SKIP:
+        parts = p.relative_to(ROOT).parts
+        if any(part.startswith(".venv") for part in parts):
+            continue
+        if p.is_file() and p.suffix in SUFFIXES and not set(parts) & SKIP:
             yield p
 
 

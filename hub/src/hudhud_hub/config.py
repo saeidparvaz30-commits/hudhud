@@ -14,8 +14,13 @@ import platformdirs
 
 DEFAULT_PORT = 8765
 CONFIG_NAME = "hudhud.toml"
-_KNOWN = {"vault_path", "vault_subfolder", "host", "port", "public_url", "client_dir"}
-_RESERVED = {"embed_model", "similarity_threshold"}  # used once search ships
+_KNOWN = {"vault_path", "vault_subfolder", "host", "port", "public_url", "client_dir",
+          "embed_model", "similarity_threshold"}
+_RESERVED: set[str] = set()
+# Multilingual (about 50 languages, Persian included) and small enough for any CPU.
+DEFAULT_EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+# Measured on Farsi/English pairs: translations ~0.75, related ideas 0.42-0.55, unrelated ~0.
+DEFAULT_THRESHOLD = 0.35
 
 TEMPLATE = """\
 # Hudhud hub settings. Uncomment and edit, then restart `hudhud serve`.
@@ -30,6 +35,11 @@ TEMPLATE = """\
 
 # host = "0.0.0.0"
 # port = 8765
+
+# Semantic search: the embedding model (downloaded on first start) and how similar a
+# note must be to count as related (0 to 1).
+# embed_model = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+# similarity_threshold = 0.35
 """
 
 
@@ -42,6 +52,8 @@ class Config:
     port: int = DEFAULT_PORT
     public_url: str | None = None
     client_dir: Path | None = None
+    embed_model: str = DEFAULT_EMBED_MODEL
+    similarity_threshold: float = DEFAULT_THRESHOLD
 
     @property
     def library_dir(self) -> Path:
@@ -50,6 +62,14 @@ class Config:
     @property
     def db_path(self) -> Path:
         return self.data_dir / "hudhud.db"
+
+    @property
+    def images_dir(self) -> Path:
+        return self.data_dir / "images"
+
+    @property
+    def models_dir(self) -> Path:
+        return self.data_dir / "models"
 
     @property
     def config_path(self) -> Path:
@@ -101,6 +121,8 @@ def load_config(data_dir: Path | None = None) -> Config:
         port=int(raw.get("port", DEFAULT_PORT)),
         public_url=raw.get("public_url"),
         client_dir=Path(client).expanduser() if client else default_client_dir(),
+        embed_model=raw.get("embed_model", DEFAULT_EMBED_MODEL),
+        similarity_threshold=float(raw.get("similarity_threshold", DEFAULT_THRESHOLD)),
     )
 
 
