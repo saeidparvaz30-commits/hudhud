@@ -175,3 +175,16 @@ def test_static_cache_rules(config, tmp_path):
     assert "immutable" in client.get("/assets/index-abc123.js").headers["cache-control"]
     assert client.get("/foliate-js/view.js").headers["cache-control"] == "no-cache"
     assert client.get("/").headers["cache-control"] == "no-cache"
+
+
+def test_a_paired_device_can_invite_another(client, config):
+    auth = pair(client, config, "PC")
+    assert client.post("/pairing-codes").status_code == 401
+    invite = client.post("/pairing-codes", headers=auth).json()
+    assert invite["url"] == f"http://hub.test:8765/?pair={invite['code']}"
+    assert invite["qr_svg"].lstrip().startswith(("<?xml", "<svg"))
+    assert invite["expires_at"] > utc_now()
+    phone = client.post("/pair", json={"code": invite["code"], "device_name": "Phone"})
+    assert phone.status_code == 200
+    names = [d["name"] for d in client.get("/devices", headers=auth).json()]
+    assert names == ["PC", "Phone"]

@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
+import webbrowser
 from contextlib import closing
 
 import qrcode
 
-from .auth import create_pairing_code, format_code, list_devices
+from .auth import create_pairing_code, format_code, list_devices, pairing_url
 from .config import Config, load_config, write_template
 from .db import MIGRATIONS, apply_migrations, connect, utc_now
 
@@ -21,7 +23,7 @@ def _open(config: Config):
 
 
 def print_pairing(config: Config, code: str) -> None:
-    url = f"{config.base_url}/?pair={code}"
+    url = pairing_url(config.base_url, code)
     print(f"\nPairing code: {format_code(code)}  (valid for 10 minutes, single use)")
     print(f"Open on your device: {url}\n")
     qr = qrcode.QRCode(border=1)
@@ -42,14 +44,20 @@ def cmd_serve(config: Config, args: argparse.Namespace) -> int:
     if config.vault_path is None:
         print("No vault_path set: highlights sync but are not written to Obsidian yet.")
     app = create_app(config)
+    port = args.port or config.port
     with closing(_open(config)) as conn:
         if not list_devices(conn):
-            print_pairing(config, create_pairing_code(conn, utc_now()))
+            code = create_pairing_code(conn, utc_now())
+            print_pairing(config, code)
+            if config.client_dir is not None and not args.no_browser:
+                # First run: open the reader on this computer, already carrying a code,
+                # so it pairs itself. Other devices are added from Settings.
+                local = pairing_url(f"http://localhost:{port}", code)
+                threading.Timer(1.5, webbrowser.open, [local]).start()
     if config.client_dir is None:
         print("Client not built: run `pnpm --dir client build` to serve the reader here.")
     print(f"Hudhud hub on {config.base_url}  (data: {config.data_dir})")
-    uvicorn.run(app, host=args.host or config.host, port=args.port or config.port,
-                log_level="info")
+    uvicorn.run(app, host=args.host or config.host, port=port, log_level="info")
     return 0
 
 
@@ -78,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     serve = sub.add_parser("serve", help="run the hub")
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
+    serve.add_argument("--no-browser", action="store_true",
+                       help="do not open the reader on first start (headless hubs)")
     sub.add_parser("pair", help="print a new pairing code")
     sub.add_parser("devices", help="list paired devices")
     args = parser.parse_args(argv)

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 
 import { health, normalizeHubUrl, pair } from '../lib/api'
 import { resetSyncedData, setPairing } from '../lib/db'
@@ -24,18 +24,32 @@ export function PairScreen() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  const autoTried = useRef(false)
+
   useEffect(() => {
-    // When the hub itself serves this page, its address is simply our origin.
-    void health(window.location.origin).then(() => setHubUrl(window.location.origin),
-                                             () => undefined)
+    // When the hub itself serves this page, its address is simply our origin. A link
+    // or QR code from "Add a device" also carries the code, so pair straight away.
+    void health(window.location.origin).then(() => {
+      setHubUrl(window.location.origin)
+      const linked = new URLSearchParams(window.location.search).get('pair')
+      if (linked && !autoTried.current) {
+        autoTried.current = true
+        void pairWith(window.location.origin, linked)
+      }
+    }, () => undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function submit(event: FormEvent) {
+  function submit(event: FormEvent) {
     event.preventDefault()
+    void pairWith(hubUrl, code)
+  }
+
+  async function pairWith(hub: string, code: string) {
     setBusy(true)
     setError(null)
     try {
-      const url = normalizeHubUrl(hubUrl)
+      const url = normalizeHubUrl(hub)
       const { device_id, token } = await pair(url, code, name.trim() || guessDeviceName())
       // A new pairing may be a different or rebuilt hub: rebuild synced data from zero.
       await resetSyncedData()
@@ -59,8 +73,8 @@ export function PairScreen() {
         <img src="/hudhud.svg" alt="" className="mb-4 h-12 w-12" />
         <h1 className="font-serif text-3xl">Hudhud</h1>
         <p className="mt-2 text-sm text-muted">
-          Pair this device with your hub. Run <code className="rounded bg-ink/10 px-1">hudhud pair</code> on
-          the hub computer to get a code.
+          Pair this device with your hub. On a device that is already paired, open
+          Settings and choose <strong>Add a device</strong>, then scan the code or type it here.
         </p>
         <label className="mt-6 block text-sm font-medium" htmlFor="hub">Hub address</label>
         <input id="hub" className={`${field} mt-1`} value={hubUrl} inputMode="url"

@@ -1,12 +1,82 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
-import { type Device, health, listDevices, revokeDevice } from '../lib/api'
+import { createInvite, type Device, health, type Invite, listDevices, revokeDevice } from '../lib/api'
 import { clearAll, getPairing } from '../lib/db'
 import { navigate, setPrefs, type Theme, useLive, usePrefs } from '../lib/hooks'
 import { IconButton } from './Icon'
 
 const SOURCE = 'https://github.com/saeidparvaz30-commits/hudhud'
+
+function useCountdown(until: string | undefined): string | null {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!until) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [until])
+  if (!until) return null
+  const left = Math.max(0, Math.round((Date.parse(until) - now) / 1000))
+  return left ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : null
+}
+
+function AddDevice({ onPaired }: { onPaired(): void }) {
+  const [invite, setInvite] = useState<Invite | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const left = useCountdown(invite?.expires_at)
+
+  const create = useCallback(async () => {
+    setError(null)
+    const pairing = await getPairing()
+    if (!pairing) return
+    try {
+      setInvite(await createInvite(pairing))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  // Refresh the device list while the invite is open, so the new device shows up.
+  useEffect(() => {
+    if (!invite) return
+    const timer = setInterval(onPaired, 3000)
+    return () => clearInterval(timer)
+  }, [invite, onPaired])
+
+  if (!invite) {
+    return (
+      <div className="mt-4">
+        <button type="button" onClick={() => void create()}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-paper">
+          Add a device
+        </button>
+        {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+      </div>
+    )
+  }
+  return (
+    <div className="mt-4 rounded-xl border border-rule bg-paper p-4">
+      <p className="text-sm">Scan this with the new device's camera, or open the link on it.</p>
+      <div className="mx-auto mt-3 w-52 rounded-lg bg-white p-3 [&_svg]:h-auto [&_svg]:w-full"
+           dangerouslySetInnerHTML={{ __html: invite.qr_svg }} />
+      {left ? (
+        <>
+          <p className="mt-3 text-center font-mono text-2xl tracking-widest">{invite.display}</p>
+          <p className="mt-1 text-center text-xs break-all text-muted">{invite.url}</p>
+          <p className="mt-2 text-center text-xs text-muted">Expires in {left}. Works once.</p>
+        </>
+      ) : (
+        <p className="mt-3 text-center text-sm text-muted">This code has expired.</p>
+      )}
+      <div className="mt-3 flex justify-center gap-2">
+        <button type="button" onClick={() => void create()}
+                className="rounded-md px-3 py-1.5 text-sm hover:bg-ink/5">New code</button>
+        <button type="button" onClick={() => setInvite(null)}
+                className="rounded-md px-3 py-1.5 text-sm hover:bg-ink/5">Done</button>
+      </div>
+    </div>
+  )
+}
 
 export function Settings() {
   const pairing = useLive(getPairing, [])
@@ -24,6 +94,10 @@ export function Settings() {
           : 'Connected, but the hub cannot write to the vault.')
     }, () => setStatus('The hub is unreachable.'))
     void listDevices(pairing).then(setDevices, () => undefined)
+  }, [pairing])
+
+  const refreshDevices = useCallback(() => {
+    if (pairing) void listDevices(pairing).then(setDevices, () => undefined)
   }, [pairing])
 
   async function revoke(device: Device) {
@@ -79,6 +153,7 @@ export function Settings() {
               </li>
             ))}
           </ul>
+          <AddDevice onPaired={refreshDevices} />
           <button type="button" onClick={() => void unpair()}
                   className="mt-4 rounded-lg border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50">
             Unpair this device

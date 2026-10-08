@@ -19,7 +19,18 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from . import __version__
-from .auth import PairingError, authenticate, list_devices, redeem_pairing_code, revoke_device
+from .auth import (
+    PairingError,
+    authenticate,
+    create_pairing_code,
+    format_code,
+    list_devices,
+    pairing_expiry,
+    pairing_url,
+    qr_svg,
+    redeem_pairing_code,
+    revoke_device,
+)
 from .config import Config
 from .db import MIGRATIONS, apply_migrations, connect, insert_book, new_ulid, utc_now
 from .library import MAX_BYTES, ImportRejected, import_book
@@ -111,6 +122,15 @@ def create_app(config: Config, vault_writer: VaultWriter | None = None) -> FastA
         except PairingError as e:
             raise HTTPException(403, str(e)) from e
         return {"device_id": device_id, "token": token}
+
+    @app.post("/pairing-codes", status_code=201)
+    def invite(conn: Conn, device: Device) -> dict:
+        """A paired device invites another: one-time code, link and QR for the new one."""
+        now = utc_now()
+        code = create_pairing_code(conn, now)
+        url = pairing_url(config.base_url, code)
+        return {"code": code, "display": format_code(code), "url": url, "qr_svg": qr_svg(url),
+                "expires_at": pairing_expiry(now)}
 
     @app.get("/devices")
     def devices(conn: Conn, device: Device) -> list[dict]:

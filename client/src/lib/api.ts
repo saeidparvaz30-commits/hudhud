@@ -90,6 +90,14 @@ export async function pullChanges(pairing: Pairing, since: number) {
                                        latest: number }
 }
 
+export interface Invite { code: string; display: string; url: string; qr_svg: string
+                         expires_at: string }
+
+/** A one-time code (with link and QR) that pairs one more device. */
+export async function createInvite(pairing: Pairing): Promise<Invite> {
+  return (await request(pairing, '/pairing-codes', { method: 'POST' })).json()
+}
+
 export interface Device { id: string; name: string; paired_at: string; last_seen: string
                           current: boolean }
 

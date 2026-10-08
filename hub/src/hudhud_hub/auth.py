@@ -41,13 +41,30 @@ def format_code(code: str) -> str:
     return f"{code[:4]}-{code[4:]}"
 
 
+def pairing_expiry(now: str) -> str:
+    return _format(_parse(now) + CODE_TTL)
+
+
 def create_pairing_code(conn: sqlite3.Connection, now: str) -> str:
     code = "".join(secrets.choice(ALPHABET) for _ in range(CODE_LENGTH))
     conn.execute(
         "INSERT INTO pairing_codes (code_hash, expires_at, used) VALUES (?, ?, 0)",
-        (_hash(code), _format(_parse(now) + CODE_TTL)),
+        (_hash(code), pairing_expiry(now)),
     )
     return code
+
+
+def pairing_url(base_url: str, code: str) -> str:
+    return f"{base_url}/?pair={code}"
+
+
+def qr_svg(data: str) -> str:
+    """A QR code as standalone SVG (drawn by the client on a white card)."""
+    import qrcode
+    import qrcode.image.svg
+
+    return qrcode.make(data, image_factory=qrcode.image.svg.SvgPathImage,
+                       border=1).to_string(encoding="unicode")
 
 
 def redeem_pairing_code(
