@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { health, normalizeHubUrl, pair } from '../lib/api'
 import { resetSyncedData, setPairing } from '../lib/db'
 import { navigate } from '../lib/hooks'
+import { isNativeApp, scanPairingCode } from '../lib/native'
 import { notifyData, syncNow } from '../lib/sync'
 
 function guessDeviceName(): string {
@@ -39,6 +40,22 @@ export function PairScreen() {
     }, () => undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  async function scan() {
+    setError(null)
+    try {
+      const found = await scanPairingCode()
+      if (!found) {
+        setError('That QR code is not a Hudhud invite. Use Settings > Add a device on a paired device.')
+        return
+      }
+      setHubUrl(found.hubUrl)
+      setCode(found.code)
+      await pairWith(found.hubUrl, found.code)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -76,6 +93,15 @@ export function PairScreen() {
           Pair this device with your hub. On a device that is already paired, open
           Settings and choose <strong>Add a device</strong>, then scan the code or type it here.
         </p>
+        {isNativeApp() && (
+          <>
+            <button type="button" onClick={() => void scan()} disabled={busy}
+                    className="mt-6 w-full rounded-lg bg-accent px-4 py-3 font-medium text-paper disabled:opacity-60">
+              Scan QR code
+            </button>
+            <p className="mt-4 text-center text-xs text-muted">or enter it by hand</p>
+          </>
+        )}
         <label className="mt-6 block text-sm font-medium" htmlFor="hub">Hub address</label>
         <input id="hub" className={`${field} mt-1`} value={hubUrl} inputMode="url"
                autoCapitalize="off" autoCorrect="off" onChange={(e) => setHubUrl(e.target.value)} />

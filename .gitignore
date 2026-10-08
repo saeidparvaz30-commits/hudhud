@@ -13,3 +13,7 @@ __pycache__/
 
 # Browser automation artifacts
 .playwright-mcp/
+
+# Android release keys (never commit)
+*.jks
+*.keystore
