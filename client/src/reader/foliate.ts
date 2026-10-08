@@ -117,6 +117,8 @@ body, p, li, blockquote, dd, div, span {
 }
 body { color: ${style.colors.ink} !important; background: transparent !important; }
 p, li, blockquote, dd {
+  /* Many books pin body text in px; the reader's text size must still win. */
+  font-size: 1rem !important;
   line-height: ${style.lineHeight} !important;
   text-align: ${style.justify ? 'justify' : 'start'};
   hyphens: auto;

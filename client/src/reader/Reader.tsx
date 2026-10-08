@@ -26,8 +26,10 @@ type Panel = null | 'toc' | 'highlights' | 'style'
 function applyLayout(view: FoliateView, prefs: ReadingPrefs) {
   const r = view.renderer
   r.setAttribute('flow', 'paginated')
-  r.setAttribute('margin', `${prefs.margin}px`)
-  r.setAttribute('gap', '6%')
+  // foliate's `margin` is the space above and below the text; the side margins
+  // people mean come from `gap` (a share of the page width).
+  r.setAttribute('margin', '40px')
+  r.setAttribute('gap', `${(2 + prefs.margin / 8).toFixed(1)}%`)
   r.setAttribute('max-inline-size', `${Math.round(660 * prefs.fontScale)}px`)
   r.setAttribute('max-column-count', '2')
   r.setStyles?.(bookCss({ fontScale: prefs.fontScale, lineHeight: prefs.lineHeight,
