@@ -27,6 +27,11 @@ type Panel = null | 'toc' | 'highlights' | 'style'
 
 function applyLayout(view: FoliateView, prefs: ReadingPrefs) {
   const r = view.renderer
+  if (view.isFixedLayout) {
+    // PDFs and comics are page images: text size means nothing, the page zoom does.
+    r.setAttribute('zoom', prefs.pageFit)
+    return
+  }
   r.setAttribute('flow', 'paginated')
   // foliate's `margin` is the space above and below the text; the side margins
   // people mean come from `gap` (a share of the page width).
@@ -82,6 +87,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
   const annotationHit = useRef(false)
   // The locator last saved for this device; opening a book must not count as reading it.
   const savedCfi = useRef<string | null>(null)
+  const reopenAt = useRef<string | null>(null)
+  const pageSpread = prefs.pageSpread
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState('')
@@ -167,14 +174,17 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
 
     ;(async () => {
       try {
-        const { Overlayer } = await loadFoliate()
+        const { Overlayer, makeBook } = await loadFoliate()
         overlayer.current = Overlayer
-        const file = await toFoliateFile(book, await getBookFile(book))
+        const parsed = await makeBook(await toFoliateFile(book, await getBookFile(book)))
         if (cancelled) return
+        if (parsed.rendition?.layout === 'pre-paginated' && pageSpread === 'one') {
+          parsed.rendition = { ...parsed.rendition, spread: 'none' }
+        }
         view = document.createElement('foliate-view') as FoliateView
         view.style.cssText = 'display:block;width:100%;height:100%'
         container.append(view)
-        await view.open(file)
+        await view.open(parsed)
         if (cancelled) return
         viewRef.current = view
         setToc(view.book.toc ?? [])
@@ -223,7 +233,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
         const progress = await bookProgress(bookId)
         const own = progress.find((p) => p.device_id === pairing?.deviceId)
         const jump = highlightId ? (await (await db()).get('highlights', highlightId))?.locator : undefined
-        const start = jump ?? own?.locator
+        const start = reopenAt.current ?? jump ?? own?.locator
+        reopenAt.current = null
         savedCfi.current = own?.locator ?? null
         await view.init({ lastLocation: start ?? null, showTextStart: !start })
         if (cancelled) return
@@ -276,15 +287,16 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
       document.removeEventListener('visibilitychange', onHide)
       window.removeEventListener('pagehide', onLeave)
       void flushSave()
+      reopenAt.current = view?.lastLocation?.cfi ?? null  // a layout change reopens here
       view?.close()
       view?.remove()
       viewRef.current = null
       drawn.current.clear()
       container.classList.remove('paper-tint')
     }
-    // Re-open only when the book itself changes, not on every metadata refresh.
+    // Re-open only when the book or the page spread changes, not on metadata refreshes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book?.id])
+  }, [book?.id, pageSpread])
 
   // Keep drawn annotations in step with local edits and synced changes.
   useEffect(() => {
@@ -387,7 +399,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
               {panel === 'highlights' && <HighlightList highlights={highlights ?? []}
                 onPick={(h) => { void viewRef.current?.goTo(h.locator); setPanel(null) }}
                 onDelete={(h) => void deleteHighlight(h)} />}
-              {panel === 'style' && <StylePanel prefs={prefs} />}
+              {panel === 'style' && <StylePanel prefs={prefs}
+                                                fixedLayout={viewRef.current?.isFixedLayout ?? false} />}
             </div>
           </aside>
         )}
@@ -441,7 +454,22 @@ function HighlightList({ highlights, onPick, onDelete }: {
   )
 }
 
-function StylePanel({ prefs }: { prefs: ReadingPrefs }) {
+function Segmented<T extends string>({ value, options, onChange }: {
+  value: T; options: [T, string][]; onChange(value: T): void
+}) {
+  return (
+    <span className="flex rounded-full border border-rule p-0.5">
+      {options.map(([key, label]) => (
+        <button key={key} type="button" onClick={() => onChange(key)} aria-pressed={value === key}
+                className={`rounded-full px-3 py-1.5 text-sm ${value === key ? 'bg-accent text-paper' : 'hover:bg-ink/5'}`}>
+          {label}
+        </button>
+      ))}
+    </span>
+  )
+}
+
+function StylePanel({ prefs, fixedLayout }: { prefs: ReadingPrefs; fixedLayout: boolean }) {
   const step = (key: 'fontScale' | 'lineHeight' | 'margin', delta: number, min: number, max: number) =>
     setPrefs({ [key]: Math.round(Math.min(max, Math.max(min, prefs[key] + delta)) * 100) / 100 })
   const row = 'flex items-center justify-between px-3 py-3 text-sm'
@@ -456,6 +484,23 @@ function StylePanel({ prefs }: { prefs: ReadingPrefs }) {
           </button>
         ))}
       </div>
+      {fixedLayout ? (
+        <>
+          <div className={row}>
+            <span>Page fit</span>
+            <Segmented value={prefs.pageFit} onChange={(pageFit) => setPrefs({ pageFit })}
+                       options={[['fit-page', 'Whole page'], ['fit-width', 'Full width']]} />
+          </div>
+          <div className={row}>
+            <span>Pages</span>
+            <Segmented value={prefs.pageSpread} onChange={(pageSpread) => setPrefs({ pageSpread })}
+                       options={[['one', 'One'], ['two', 'Two']]} />
+          </div>
+          <p className="px-3 pb-3 text-xs text-muted">
+            PDFs and comics are fixed pages. For bigger text, pick one page at full width and scroll.
+          </p>
+        </>
+      ) : (<>
       <div className={row}>
         <span>Text size</span>
         <span className="flex items-center gap-3">
@@ -485,6 +530,7 @@ function StylePanel({ prefs }: { prefs: ReadingPrefs }) {
         <input type="checkbox" checked={prefs.justify} onChange={(e) => setPrefs({ justify: e.target.checked })}
                className="h-5 w-5 accent-[var(--accent)]" />
       </label>
+      </>)}
     </div>
   )
 }

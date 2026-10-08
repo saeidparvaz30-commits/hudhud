@@ -72,10 +72,14 @@ export interface ReadingPrefs {
   lineHeight: number
   margin: number
   justify: boolean
+  /** PDFs and comics: how a page fits the screen, and one page or two side by side. */
+  pageFit: 'fit-page' | 'fit-width'
+  pageSpread: 'one' | 'two'
 }
 
 const DEFAULT_PREFS: ReadingPrefs = { theme: 'paper', fontScale: 1.1, lineHeight: 1.6,
-                                      margin: 48, justify: true }
+                                      margin: 48, justify: true, pageFit: 'fit-page',
+                                      pageSpread: 'two' }
 const PREFS_KEY = 'hudhud.reading'
 
 function loadPrefs(): ReadingPrefs {

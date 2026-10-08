@@ -24,7 +24,7 @@ export interface FoliateBook {
   dir?: string
   toc?: TocItem[]
   metadata?: { title?: unknown; language?: string | string[] }
-  rendition?: { layout?: string }
+  rendition?: { layout?: string; spread?: string }
 }
 
 export interface FoliateRenderer extends HTMLElement {
@@ -38,7 +38,7 @@ export interface FoliateView extends HTMLElement {
   renderer: FoliateRenderer
   isFixedLayout: boolean
   lastLocation: RelocateDetail | null
-  open(file: File): Promise<void>
+  open(file: File | FoliateBook): Promise<void>
   close(): void
   init(options: { lastLocation?: string | null; showTextStart?: boolean }): Promise<void>
   goTo(target: string | number): Promise<unknown>
@@ -54,18 +54,20 @@ export interface FoliateView extends HTMLElement {
   getSectionFractions(): number[]
 }
 
-interface OverlayerModule {
+interface FoliateModules {
   Overlayer: { highlight: unknown; underline: unknown }
+  makeBook(file: File): Promise<FoliateBook>
 }
 
-let loading: Promise<OverlayerModule> | null = null
+let loading: Promise<FoliateModules> | null = null
 
-/** Registers <foliate-view> and returns the Overlayer helpers. */
-export function loadFoliate(): Promise<OverlayerModule> {
+/** Registers <foliate-view> and returns the helpers Hudhud uses. */
+export function loadFoliate(): Promise<FoliateModules> {
   loading ??= (async () => {
     const base = new URL('/foliate-js/', window.location.href).href
-    await import(/* @vite-ignore */ `${base}view.js`)
-    return (await import(/* @vite-ignore */ `${base}overlayer.js`)) as OverlayerModule
+    const view = await import(/* @vite-ignore */ `${base}view.js`)
+    const overlayer = await import(/* @vite-ignore */ `${base}overlayer.js`)
+    return { Overlayer: overlayer.Overlayer, makeBook: view.makeBook } as FoliateModules
   })()
   return loading
 }
