@@ -122,7 +122,7 @@ function applyLayout(view: FoliateView, prefs: ReadingPrefs) {
   r.setAttribute('margin', '40px')
   r.setAttribute('gap', `${(2 + prefs.margin / 8).toFixed(1)}%`)
   r.setAttribute('max-inline-size', `${Math.round(660 * prefs.fontScale)}px`)
-  r.setAttribute('max-column-count', '2')
+  r.setAttribute('max-column-count', prefs.pageSpread === 'one' ? '1' : '2')
   r.setStyles?.(bookCss({ fontScale: prefs.fontScale, lineHeight: prefs.lineHeight,
                           justify: prefs.justify, colors: THEME_COLORS[prefs.theme] }))
   view.style.setProperty('--overlayer-highlight-opacity', prefs.theme === 'night' ? '0.45' : '0.4')
@@ -180,7 +180,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
   const savedCfi = useRef<string | null>(null)
   const reopenAt = useRef<string | null>(null)
   const textMode = useRef(false)  // the open view is a PDF's text view
-  const pageSpread = prefs.pageSpread
+  // Only fixed-layout books reopen to change the spread; reflowable ones re-columnize live.
+  const pageSpread = book && (book.format === 'cbz' || book.format === 'pdf') ? prefs.pageSpread : null
   const [pdfView, setPdfViewState] = useState<PdfView>(() => initialPdfView(bookId))
   const textView = book?.format === 'pdf' && pdfView === 'text'
   const [preparing, setPreparing] = useState<string | null>(null)
@@ -667,6 +668,11 @@ function StylePanel({ prefs, fixedLayout, pdfView, onPdfView }: {
           Text view reflows the PDF for small screens. Figures and layout are in Pages view.
         </p>
       )}
+      <div className={row}>
+        <span>Pages side by side</span>
+        <Segmented value={prefs.pageSpread} onChange={(pageSpread) => setPrefs({ pageSpread })}
+                   options={[['one', 'One'], ['two', 'Two']]} />
+      </div>
       {fixedLayout ? (
         <>
           <div className={row}>
@@ -674,11 +680,6 @@ function StylePanel({ prefs, fixedLayout, pdfView, onPdfView }: {
             <Segmented value={typeof prefs.pageFit === 'number' ? 'zoomed' : prefs.pageFit}
                        onChange={(pageFit) => pageFit !== 'zoomed' && setPrefs({ pageFit })}
                        options={[['fit-page', 'Whole page'], ['fit-width', 'Full width']]} />
-          </div>
-          <div className={row}>
-            <span>Pages</span>
-            <Segmented value={prefs.pageSpread} onChange={(pageSpread) => setPrefs({ pageSpread })}
-                       options={[['one', 'One'], ['two', 'Two']]} />
           </div>
           <p className="px-3 pb-3 text-xs text-muted">
             Pinch to zoom. On a phone, Text view is easier to read than zoomed pages.
@@ -688,9 +689,9 @@ function StylePanel({ prefs, fixedLayout, pdfView, onPdfView }: {
       <div className={row}>
         <span>Text size</span>
         <span className="flex items-center gap-3">
-          <button type="button" className={btn} aria-label="Smaller text" onClick={() => step('fontScale', -0.1, 0.7, 2)}>A-</button>
+          <button type="button" className={btn} aria-label="Smaller text" onClick={() => step('fontScale', -0.1, 0.7, 3)}>A-</button>
           <span className="w-10 text-center tabular-nums">{Math.round(prefs.fontScale * 100)}%</span>
-          <button type="button" className={btn} aria-label="Larger text" onClick={() => step('fontScale', 0.1, 0.7, 2)}>A+</button>
+          <button type="button" className={btn} aria-label="Larger text" onClick={() => step('fontScale', 0.1, 0.7, 3)}>A+</button>
         </span>
       </div>
       <div className={row}>
