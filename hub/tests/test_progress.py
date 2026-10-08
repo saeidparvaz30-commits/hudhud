@@ -3,6 +3,7 @@ import math
 import sqlite3
 
 import pytest
+
 from hudhud_hub.db import MIGRATIONS
 from hudhud_hub.progress import (
     Progress,

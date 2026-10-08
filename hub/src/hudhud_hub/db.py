@@ -16,7 +16,7 @@ MIGRATION_RE = re.compile(r"^(\d{4})_[\w-]+\.sql$")
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(path, isolation_level=None)
+    conn = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if str(path) != ":memory:":
