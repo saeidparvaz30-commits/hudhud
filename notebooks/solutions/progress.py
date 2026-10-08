@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 
 _COLUMNS = "book_id, device_id, locator, fraction, updated_at"
+TIMESTAMP_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z")
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,8 @@ def upsert_progress(conn: sqlite3.Connection, p: Progress) -> bool:
         raise ValueError(f"fraction must be within [0, 1], got {p.fraction}")
     if not p.locator:
         raise ValueError("locator is required")
+    if not TIMESTAMP_RE.fullmatch(p.updated_at):
+        raise ValueError(f"updated_at must be YYYY-MM-DDTHH:MM:SS.mmmZ, got {p.updated_at!r}")
     cur = conn.execute(
         f"INSERT INTO progress ({_COLUMNS}) VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT (book_id, device_id) DO UPDATE SET "

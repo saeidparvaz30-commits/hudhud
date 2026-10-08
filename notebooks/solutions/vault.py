@@ -20,7 +20,7 @@ INTRO = "Anything written outside the markers is yours. Hudhud never changes it.
 FORBIDDEN = re.compile(r'[\\/:*?"<>|#^\[\]\x00-\x1f]')
 WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL",
                     *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
-MAX_TITLE = 120
+MAX_TITLE_BYTES = 150
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ class WriteResult:
 
 def sanitize_title(title: str, fallback: str) -> str:
     s = re.sub(r"\s+", " ", FORBIDDEN.sub(" ", title)).strip().rstrip(". ")
-    s = s[:MAX_TITLE].rstrip(". ")
+    s = s.encode("utf-8")[:MAX_TITLE_BYTES].decode("utf-8", "ignore").rstrip(". ")
     if not s:
         return fallback
     if s.split(".")[0].upper() in WINDOWS_RESERVED:
@@ -70,7 +70,7 @@ def _escape(text: str) -> str:
 
 
 def _normalize(text: str) -> str:
-    return text.replace("\r\n", "\n")
+    return text.removeprefix("﻿").replace("\r\n", "\n")
 
 
 def render_frontmatter(book: BookMeta) -> str:

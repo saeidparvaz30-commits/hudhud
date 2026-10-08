@@ -12,12 +12,14 @@ import struct
 import urllib.parse
 import xml.etree.ElementTree as ET
 import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 import pymupdf
 
 MAX_BYTES = 500 * 1024 * 1024
+MAX_MEMBER_BYTES = 50 * 1024 * 1024
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 FONT_OBFUSCATION = {"http://www.idpf.org/2008/embedding", "http://ns.adobe.com/pdf/enc#RC"}
 NS = {
@@ -27,7 +29,7 @@ NS = {
 }
 FB2 = {"fb": "http://www.gribuser.ru/xml/fictionbook/2.0"}
 _CORRUPT = (zipfile.BadZipFile, ET.ParseError, struct.error, KeyError, IndexError,
-            AttributeError, UnicodeDecodeError)
+            AttributeError, UnicodeDecodeError, zlib.error, RuntimeError, EOFError)
 
 
 class ImportRejected(Exception):
@@ -93,13 +95,29 @@ def _looks_like_text(path: Path) -> bool:
     return True
 
 
+def _read_member(z: zipfile.ZipFile, name: str) -> bytes:
+    info = z.getinfo(name)
+    if info.file_size > MAX_MEMBER_BYTES:
+        raise ImportRejected("archive entry too large")
+    return z.read(info)
+
+
+def _is_comic_entry(name: str) -> bool:
+    entry = PurePosixPath(name)
+    return entry.suffix.lower() in IMAGE_EXTS or entry.name.lower() == "comicinfo.xml"
+
+
 def _zip_kind(path: Path) -> str:
     try:
         with zipfile.ZipFile(path) as z:
-            names = z.namelist()
-            if "mimetype" in names and z.read("mimetype").strip() == b"application/epub+zip":
+            names = [n for n in z.namelist() if not n.endswith("/")]
+            if "META-INF/container.xml" in names or (
+                "mimetype" in names
+                and _read_member(z, "mimetype").strip() == b"application/epub+zip"
+            ):
                 return "epub"
-            if any(PurePosixPath(n).suffix.lower() in IMAGE_EXTS for n in names):
+            images = [n for n in names if PurePosixPath(n).suffix.lower() in IMAGE_EXTS]
+            if images and all(_is_comic_entry(n) for n in names):
                 return "cbz"
     except zipfile.BadZipFile as e:
         raise ImportRejected("corrupt file") from e
@@ -155,7 +173,7 @@ def _epub_drm(z: zipfile.ZipFile) -> bool:
     if "META-INF/rights.xml" in names:
         return True
     if "META-INF/encryption.xml" in names:
-        root = ET.fromstring(z.read("META-INF/encryption.xml"))
+        root = ET.fromstring(_read_member(z, "META-INF/encryption.xml"))
         for el in root.iter():
             if el.tag.endswith("EncryptionMethod") and el.get("Algorithm") not in FONT_OBFUSCATION:
                 return True
@@ -163,9 +181,9 @@ def _epub_drm(z: zipfile.ZipFile) -> bool:
 
 
 def _epub_opf(z: zipfile.ZipFile) -> tuple[str, ET.Element]:
-    container = ET.fromstring(z.read("META-INF/container.xml"))
+    container = ET.fromstring(_read_member(z, "META-INF/container.xml"))
     opf_path = container.find(".//c:rootfile", NS).get("full-path")
-    return opf_path, ET.fromstring(z.read(opf_path))
+    return opf_path, ET.fromstring(_read_member(z, opf_path))
 
 
 def _text(el: ET.Element | None) -> str | None:
@@ -194,7 +212,7 @@ def _epub_cover(z: zipfile.ZipFile, opf_path: str, opf: ET.Element) -> bytes | N
         return None
     full = str(PurePosixPath(opf_path).parent / urllib.parse.unquote(href))
     try:
-        return z.read(full)
+        return _read_member(z, full)
     except KeyError:
         return None
 
@@ -219,10 +237,10 @@ def _natural_key(name: str) -> list:
 
 def _cbz_cover(z: zipfile.ZipFile) -> bytes:
     images = [n for n in z.namelist() if PurePosixPath(n).suffix.lower() in IMAGE_EXTS]
-    return z.read(min(images, key=_natural_key))
+    return _read_member(z, min(images, key=_natural_key))
 
 
-def _pdf_inspect(path: Path) -> tuple[Metadata, bytes]:
+def _pdf_inspect(path: Path) -> tuple[Metadata, bytes | None]:
     try:
         doc = pymupdf.open(path, filetype="pdf")
     except Exception as e:
@@ -233,10 +251,17 @@ def _pdf_inspect(path: Path) -> tuple[Metadata, bytes]:
         if doc.page_count == 0:
             raise ImportRejected("corrupt file")
         meta = doc.metadata or {}
-        page = doc[0]
-        zoom = 600 / page.rect.width if page.rect.width else 1.0
-        cover = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).tobytes("png")
+        cover = _render_cover(doc[0])
     return Metadata(meta.get("title") or None, meta.get("author") or None, None), cover
+
+
+def _render_cover(page) -> bytes | None:
+    longest = max(page.rect.width, page.rect.height)
+    zoom = 600 / longest if longest else 1.0
+    try:
+        return page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).tobytes("png")
+    except Exception:
+        return None
 
 
 def _image_ext(data: bytes) -> str | None:
@@ -285,8 +310,8 @@ def import_book(
         raise ImportRejected("empty file")
     if size > max_bytes:
         raise ImportRejected("file too large")
-    fmt = detect_format(src)
     try:
+        fmt = detect_format(src)
         meta, cover = _inspect(src, fmt)
     except _CORRUPT as e:
         raise ImportRejected("corrupt file") from e

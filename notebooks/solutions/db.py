@@ -71,9 +71,11 @@ def apply_migrations(conn: sqlite3.Connection, migrations_dir: Path) -> list[int
 
 def insert_book(conn: sqlite3.Connection, book: dict, now: str) -> bool:
     cur = conn.execute(
-        "INSERT OR IGNORE INTO books "
+        "INSERT INTO books "
         "(id, title, author, language, format, file_size, cover_path, added_at, updated_at) "
-        "VALUES (:id, :title, :author, :language, :format, :file_size, :cover_path, :now, :now)",
+        "VALUES (:id, :title, :author, :language, :format, :file_size, :cover_path, :now, :now) "
+        "ON CONFLICT (id) DO UPDATE SET deleted = 0, updated_at = excluded.updated_at "
+        "WHERE books.deleted = 1",
         {**book, "now": now},
     )
     return cur.rowcount == 1
