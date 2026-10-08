@@ -159,3 +159,19 @@ def test_raw_upload_uses_the_given_filename(client, config):
     response = client.post("/books?filename=My%20Notes.txt", content="سلام".encode(),
                            headers={**auth, "Content-Type": "application/octet-stream"})
     assert response.status_code == 201 and response.json()["title"] == "My Notes"
+
+
+def test_static_cache_rules(config, tmp_path):
+    """Hashed build assets are immutable; everything else (vendored foliate-js,
+    pdf.js) must revalidate, or phones keep running stale code after an update."""
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "foliate-js").mkdir()
+    (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+    (dist / "assets" / "index-abc123.js").write_text("1", encoding="utf-8")
+    (dist / "foliate-js" / "view.js").write_text("2", encoding="utf-8")
+    from dataclasses import replace
+    client = TestClient(create_app(replace(config, client_dir=dist)))
+    assert "immutable" in client.get("/assets/index-abc123.js").headers["cache-control"]
+    assert client.get("/foliate-js/view.js").headers["cache-control"] == "no-cache"
+    assert client.get("/").headers["cache-control"] == "no-cache"

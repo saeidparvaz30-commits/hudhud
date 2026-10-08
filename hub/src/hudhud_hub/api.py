@@ -205,7 +205,10 @@ def _mount_client(app: FastAPI, client_dir: Path) -> None:
     def client(path: str) -> FileResponse:
         target = (root / path).resolve()
         if path and target.is_file() and target.is_relative_to(root):
-            return FileResponse(target)
+            # Vite's hashed assets never change under the same name; everything else
+            # (vendored foliate-js and pdf.js) revalidates so updates reach phones.
+            cache = IMMUTABLE if path.startswith("assets/") else {"Cache-Control": "no-cache"}
+            return FileResponse(target, headers=cache)
         if path == "" or path.startswith("read/") or path == "settings":
             if index.is_file():
                 return FileResponse(index, headers={"Cache-Control": "no-cache"})
