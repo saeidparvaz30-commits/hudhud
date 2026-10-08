@@ -600,6 +600,51 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
   )
 }
 
+function HighlightItem({ h, onPick, onDelete }: {
+  h: Highlight; onPick(h: Highlight): void; onDelete(h: Highlight): void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [note, setNote] = useState(h.comment)
+
+  async function save() {
+    setEditing(false)
+    if (note.trim() !== h.comment.trim()) await updateHighlight(h, { comment: note.trim() })
+  }
+
+  return (
+    <li className="rounded-lg hover:bg-ink/5">
+      <button type="button" onClick={() => onPick(h)} className="block w-full p-3 pb-1 text-start">
+        <p className="border-s-4 ps-2 font-serif text-sm leading-relaxed line-clamp-4" dir="auto"
+           style={{ borderColor: HIGHLIGHT_CSS[h.color] }}>{h.text}</p>
+        {h.comment && !editing && (
+          <p className="mt-1.5 ps-3 text-xs whitespace-pre-wrap text-muted" dir="auto">{h.comment}</p>
+        )}
+        <p className="mt-1 ps-3 text-xs text-muted">{Math.round(h.fraction * 100)}%</p>
+      </button>
+      {editing ? (
+        <div className="px-3 pb-3">
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} dir="auto"
+                    autoFocus placeholder="Your note" aria-label="Note"
+                    className="w-full resize-y rounded-lg border border-rule bg-paper p-2 text-sm outline-none focus:border-accent" />
+          <div className="mt-1 flex justify-end gap-2">
+            <button type="button" onClick={() => { setNote(h.comment); setEditing(false) }}
+                    className="rounded-md px-3 py-1 text-sm hover:bg-ink/5">Cancel</button>
+            <button type="button" onClick={() => void save()}
+                    className="rounded-md bg-accent px-3 py-1 text-sm text-paper">Save</button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-4 px-3 pb-2 text-xs">
+          <button type="button" onClick={() => { setNote(h.comment); setEditing(true) }}
+                  className="text-accent">{h.comment ? 'Edit note' : 'Add note'}</button>
+          <button type="button" onClick={() => onDelete(h)}
+                  className="text-red-700 opacity-70 hover:opacity-100">Delete</button>
+        </div>
+      )}
+    </li>
+  )
+}
+
 function HighlightList({ highlights, onPick, onDelete }: {
   highlights: Highlight[]; onPick(h: Highlight): void; onDelete(h: Highlight): void
 }) {
@@ -608,18 +653,7 @@ function HighlightList({ highlights, onPick, onDelete }: {
   }
   return (
     <ul className="space-y-1">
-      {highlights.map((h) => (
-        <li key={h.id} className="group rounded-lg hover:bg-ink/5">
-          <button type="button" onClick={() => onPick(h)} className="block w-full p-3 text-start">
-            <p className="border-s-4 ps-2 font-serif text-sm leading-relaxed line-clamp-4" dir="auto"
-               style={{ borderColor: HIGHLIGHT_CSS[h.color] }}>{h.text}</p>
-            {h.comment && <p className="mt-1.5 ps-3 text-xs text-muted" dir="auto">{h.comment}</p>}
-            <p className="mt-1 ps-3 text-xs text-muted">{Math.round(h.fraction * 100)}%</p>
-          </button>
-          <button type="button" onClick={() => onDelete(h)}
-                  className="mb-2 ms-3 text-xs text-red-700 opacity-70 hover:opacity-100">Delete</button>
-        </li>
-      ))}
+      {highlights.map((h) => <HighlightItem key={h.id} h={h} onPick={onPick} onDelete={onDelete} />)}
     </ul>
   )
 }

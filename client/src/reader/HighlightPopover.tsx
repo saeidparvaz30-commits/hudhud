@@ -28,7 +28,7 @@ interface Props {
 
 export function HighlightPopover({ target, onCreate, onUpdate, onDelete, onClose }: Props) {
   const { existing } = target
-  const [noting, setNoting] = useState(Boolean(existing?.comment))
+  const [noting, setNoting] = useState(Boolean(existing))
   const [comment, setComment] = useState(existing?.comment ?? '')
   const box = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: target.x, top: target.bottom + 10 })
