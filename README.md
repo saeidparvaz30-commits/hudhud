@@ -9,28 +9,47 @@ birds to the Simorgh.
 
 ## Status
 
-Early development. The hub's core modules exist and are tested:
+Early but usable: a hub on your PC, a reader in any browser on PC and phone.
 
-| Module | Does |
-|---|---|
-| `library.py` | Imports EPUB, PDF, MOBI, AZW3, FB2, CBZ and TXT: format detection, DRM rejection, metadata, covers, content addressing |
-| `db.py` | SQLite connection, migrations, ULIDs, tombstones |
-| `progress.py` | Per-device reading positions and the resume rule |
-| `vault.py` | Writes highlights into a managed region of an Obsidian note |
+- Import EPUB, PDF, MOBI, AZW3, FB2, CBZ and TXT (DRM-free only).
+- Paper, sepia and night themes; Literata and Vazirmatn; right-to-left text.
+- Resume where you stopped, including "Continue from Phone at 63%?".
+- Highlights with colours and notes, written to your Obsidian vault with
+  linkable block IDs.
+- Changes sync through the hub; each device keeps working offline and catches up.
 
-Search, sync, the HTTP API and the reader client come next.
+Semantic search across your notes ("what did I write about this in other
+books?") is next.
+
+## Run it
+
+Requirements: Python 3.12 with [uv](https://docs.astral.sh/uv/), Node 22 with pnpm.
+
+    pnpm --dir client install
+    pnpm --dir client build
+    uv run --project hub hudhud serve
+
+The first start prints a pairing code and a QR code, and writes a settings
+file (`hudhud.toml`) in your data folder. Set `vault_path` there to your
+Obsidian vault and restart. Open the printed address on your PC or phone (same
+network, or over Tailscale), enter the code, and import a book.
+
+Pair another device with `uv run --project hub hudhud pair`.
 
 ## Layout
 
-    hub/         Python hub (uv project): src/hudhud_hub/, tests/
+    hub/         Python hub (uv project): FastAPI, SQLite, vault writer
+    client/      browser reader (React, Vite, foliate-js)
     LICENSE      AGPL-3.0-or-later
     CLA.md       contributor licence agreement
 
 ## Development
 
-    uv sync --project hub
     uv run --project hub pytest hub/tests
     uv run --project hub ruff check .
+    pnpm --dir client test
+    pnpm --dir client typecheck
+    pnpm --dir client dev      # hot-reloading client against a running hub
 
 ## Licence
 

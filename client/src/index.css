@@ -1,0 +1,100 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+@import 'tailwindcss';
+@import '@fontsource-variable/literata';
+@import '@fontsource-variable/vazirmatn';
+
+@theme {
+  --font-serif: 'Literata Variable', 'Vazirmatn Variable', Georgia, serif;
+  --font-sans: system-ui, 'Vazirmatn Variable', sans-serif;
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-rule: var(--rule);
+  --color-raised: var(--raised);
+}
+
+:root,
+[data-theme='paper'] {
+  --paper: #f4ecd8;
+  --ink: #3b2f2f;
+  --muted: #7a6a58;
+  --accent: #8a5a2b;
+  --rule: #ddd0b3;
+  --raised: #fbf6ea;
+  --noise-opacity: 0.08;
+  color-scheme: light;
+}
+
+[data-theme='sepia'] {
+  --paper: #e9d9b6;
+  --ink: #4a3826;
+  --muted: #7d6646;
+  --accent: #8a4f1f;
+  --rule: #d2bd92;
+  --raised: #f2e6cb;
+  --noise-opacity: 0.1;
+  color-scheme: light;
+}
+
+[data-theme='night'] {
+  --paper: #1c1a17;
+  --ink: #d9cfbf;
+  --muted: #9a8f7e;
+  --accent: #d9a066;
+  --rule: #38332c;
+  --raised: #262320;
+  --noise-opacity: 0.05;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Subtle paper grain over the reading surface. */
+.paper-grain {
+  position: relative;
+  background-color: var(--paper);
+}
+.paper-grain::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--noise-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.25 0 0 0 0 0.18 0 0 0 0 0.1 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 1;
+}
+
+/* PDF and comic pages get the paper tint through a multiply layer (spec 6). */
+.paper-tint::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--paper);
+  mix-blend-mode: multiply;
+  z-index: 2;
+}
+[data-theme='night'] .paper-tint::after {
+  mix-blend-mode: normal;
+  background: transparent;
+}
+[data-theme='night'] .paper-tint foliate-view {
+  filter: invert(0.88) hue-rotate(180deg);
+}
+
+button {
+  cursor: pointer;
+}
