@@ -104,11 +104,11 @@ export function Library() {
   const failures = results.filter((r) => r.error)
 
   return (
-    <div className="paper-grain min-h-full"
+    <div className="paper-grain safe-x min-h-full"
          onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
          onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false) }}
          onDrop={onDrop}>
-      <header className="relative z-10 mx-auto flex max-w-6xl items-center gap-3 px-4 pt-6 pb-4 sm:px-8">
+      <header className="relative z-10 mx-auto flex max-w-6xl items-center gap-3 px-4 pt-[calc(1.5rem+var(--safe-top))] pb-4 sm:px-8">
         <img src="/hudhud.svg" alt="" className="h-8 w-8" />
         <h1 className="font-serif text-2xl">Library</h1>
         <SyncDot />
@@ -123,7 +123,7 @@ export function Library() {
                onChange={(e) => { void upload(Array.from(e.target.files ?? [])); e.target.value = '' }} />
       </header>
 
-      <main className="relative z-10 mx-auto max-w-6xl px-4 pb-16 sm:px-8">
+      <main className="relative z-10 mx-auto max-w-6xl px-4 pb-[calc(4rem+var(--safe-bottom))] sm:px-8">
         {failures.length > 0 && (
           <div role="alert" className="mb-6 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">
             {failures.map((f) => <p key={f.name}><strong>{f.name}</strong>: {f.error}</p>)}

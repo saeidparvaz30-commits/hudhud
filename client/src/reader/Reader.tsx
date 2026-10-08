@@ -507,8 +507,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
   const bar = `relative z-20 flex items-center gap-1 px-2 transition-opacity duration-200 ${chrome ? 'opacity-100' : 'pointer-events-none opacity-0'}`
 
   return (
-    <div className="paper-grain flex h-full flex-col overflow-hidden">
-      <header className={`${bar} h-14 border-b border-rule/60`}>
+    <div className="paper-grain safe-x flex h-full flex-col overflow-hidden">
+      <header className={`${bar} box-content h-14 border-b border-rule/60 pt-[var(--safe-top)]`}>
         <IconButton icon="back" label="Back to library" onClick={() => navigate('/')} />
         <p className="min-w-0 flex-1 truncate px-1 font-serif" dir="auto">{book?.title}</p>
         <IconButton icon="list" label="Contents" active={panel === 'toc'}
@@ -576,7 +576,7 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
         )}
       </div>
 
-      <footer className={`${bar} h-12 gap-3 border-t border-rule/60 px-4 text-xs text-muted`}>
+      <footer className={`${bar} box-content h-12 gap-3 border-t border-rule/60 px-4 pb-[var(--safe-bottom)] text-xs text-muted`}>
         <button type="button" aria-label="Previous page" onClick={() => void viewRef.current?.goLeft()}
                 className="grid h-8 w-8 place-items-center rounded-full hover:bg-ink/10">
           <Icon name="left" size={18} />

@@ -84,7 +84,7 @@ export function PairScreen() {
   const field = 'w-full rounded-lg border border-rule bg-raised px-3 py-2.5 text-ink outline-none focus:border-accent'
 
   return (
-    <main className="paper-grain grid min-h-full place-items-center px-4 py-10">
+    <main className="paper-grain safe-x grid min-h-full place-items-center px-4 pt-[calc(2.5rem+var(--safe-top))] pb-[calc(2.5rem+var(--safe-bottom))]">
       <form onSubmit={submit}
             className="relative z-10 w-full max-w-sm rounded-2xl border border-rule bg-raised/80 p-7 shadow-sm">
         <img src="/hudhud.svg" alt="" className="mb-4 h-12 w-12" />
