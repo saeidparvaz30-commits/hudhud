@@ -80,6 +80,16 @@ export async function commitLocal(change: Change,
   await tx.done
 }
 
+/**
+ * Drop everything that came from a hub (books, progress, highlights, cursor) so the
+ * next pull rebuilds it. Unsent edits in the outbox and cached book files stay.
+ */
+export async function resetSyncedData(): Promise<void> {
+  const d = await db()
+  for (const store of ['books', 'progress', 'highlights'] as const) await d.clear(store)
+  await d.put('meta', 0, 'cursor')
+}
+
 /** Forget everything local (used when unpairing). */
 export async function clearAll(): Promise<void> {
   const d = await db()

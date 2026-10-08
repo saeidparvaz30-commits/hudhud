@@ -12,10 +12,11 @@ from contextlib import closing
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from .auth import PairingError, authenticate, list_devices, redeem_pairing_code, revoke_device
@@ -129,18 +130,25 @@ def create_app(config: Config, vault_writer: VaultWriter | None = None) -> FastA
         return [book_payload(get_book_row(conn, r["id"])) for r in rows]
 
     @app.post("/books", status_code=201)
-    def upload(conn: Conn, device: Device, file: Annotated[UploadFile, File()]) -> dict:
+    async def upload(request: Request, conn: Conn, device: Device,
+                     filename: Annotated[str, Query(max_length=255)] = "book",
+                     content_length: Annotated[int | None, Header()] = None) -> dict:
+        """The book is the raw request body. Auth and the declared size are checked
+        before a single byte is read, so nobody can fill the disk without a token."""
+        if content_length is not None and content_length > MAX_BYTES:
+            raise HTTPException(413, "books are limited to 500 MB")
         part = config.library_dir / f".upload-{new_ulid()}.part"
         try:
             size = 0
             with open(part, "wb") as out:
-                while chunk := file.file.read(CHUNK):
+                async for chunk in request.stream():
                     size += len(chunk)
                     if size > MAX_BYTES:
                         raise HTTPException(413, "books are limited to 500 MB")
                     out.write(chunk)
             try:
-                record = import_book(part, config.library_dir, original_name=file.filename)
+                record = await run_in_threadpool(import_book, part, config.library_dir,
+                                                 Path(filename).name)
             except ImportRejected as e:
                 raise HTTPException(422, e.reason) from e
         finally:

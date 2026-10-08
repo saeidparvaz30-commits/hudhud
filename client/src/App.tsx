@@ -2,6 +2,7 @@
 import { useEffect } from 'react'
 
 import { Library } from './components/Library'
+import { Notices } from './components/Notices'
 import { PairScreen } from './components/PairScreen'
 import { Settings } from './components/Settings'
 import { getPairing } from './lib/db'
@@ -20,6 +21,15 @@ export default function App() {
   useEffect(() => (paired ? startAutoSync() : undefined), [paired])
 
   if (pairing === undefined) return null
+  return (
+    <>
+      <Screen paired={paired} route={route} />
+      <Notices />
+    </>
+  )
+}
+
+function Screen({ paired, route }: { paired: boolean; route: ReturnType<typeof useRoute> }) {
   if (!paired) return <PairScreen />
   if (route.name === 'reader') {
     return <Reader key={route.bookId} bookId={route.bookId} highlightId={route.highlight} />

@@ -5,8 +5,10 @@ import { Icon, IconButton } from '../components/Icon'
 import { createHighlight, deleteHighlight, getBookFile, saveProgress,
          updateHighlight } from '../lib/actions'
 import { listDevices } from '../lib/api'
+import { notify } from '../lib/notices'
 import { bookHighlights, bookProgress, db, getBook, getPairing } from '../lib/db'
 import { navigate, type ReadingPrefs, setPrefs, type Theme, useLive, usePrefs } from '../lib/hooks'
+import { dataChanged, syncNow } from '../lib/sync'
 import { shouldOfferResume } from '../lib/merge'
 import type { Highlight, HighlightColor, Progress } from '../lib/types'
 import { bookCss, type FoliateView, HIGHLIGHT_CSS, loadFoliate, type RelocateDetail,
@@ -78,6 +80,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const pendingSave = useRef<RelocateDetail | null>(null)
   const annotationHit = useRef(false)
+  // The locator last saved for this device; opening a book must not count as reading it.
+  const savedCfi = useRef<string | null>(null)
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState('')
@@ -90,11 +94,13 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
 
   prefsRef.current = prefs
 
-  const flushSave = useCallback(() => {
+  const flushSave = useCallback(async () => {
     clearTimeout(saveTimer.current)
     const detail = pendingSave.current
     pendingSave.current = null
-    if (detail?.cfi) void saveProgress(bookId, detail.cfi, detail.fraction ?? 0)
+    if (!detail?.cfi || detail.cfi === savedCfi.current) return
+    savedCfi.current = detail.cfi
+    await saveProgress(bookId, detail.cfi, detail.fraction ?? 0)
   }, [bookId])
 
   const openPopover = useCallback((doc: Document, range: Range, data: Partial<PopoverTarget>) => {
@@ -110,6 +116,7 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
     const container = host.current
     let cancelled = false
     let view: FoliateView | undefined
+    let stopResumeWatch = () => {}
 
     const onKey = (e: KeyboardEvent) => {
       const v = viewRef.current
@@ -177,7 +184,7 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
           setLocation(detail)
           pendingSave.current = detail
           clearTimeout(saveTimer.current)
-          saveTimer.current = setTimeout(flushSave, 1500)
+          saveTimer.current = setTimeout(() => void flushSave(), 1500)
         })
         view.addEventListener('load', (e) => {
           const { doc, index } = (e as CustomEvent<{ doc: Document; index: number }>).detail
@@ -217,15 +224,23 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
         const own = progress.find((p) => p.device_id === pairing?.deviceId)
         const jump = highlightId ? (await (await db()).get('highlights', highlightId))?.locator : undefined
         const start = jump ?? own?.locator
+        savedCfi.current = own?.locator ?? null
         await view.init({ lastLocation: start ?? null, showTextStart: !start })
         if (cancelled) return
         setStatus('ready')
 
         if (!jump && pairing) {
-          const other = progress.filter((p) => p.device_id !== pairing.deviceId)
-            .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
-          const pages = view.lastLocation?.location?.total ?? 300
-          if (shouldOfferResume(own, other, pages)) {
+          // Check now, and again when a sync lands (it may bring a newer position).
+          let offered = false
+          const checkResume = async () => {
+            if (offered || cancelled) return
+            const latest = await bookProgress(bookId)
+            const mine = latest.find((p) => p.device_id === pairing.deviceId)
+            const other = latest.filter((p) => p.device_id !== pairing.deviceId)
+              .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+            const pages = view?.lastLocation?.location?.total ?? 300
+            if (!shouldOfferResume(mine, other, pages)) return
+            offered = true
             let device = 'another device'
             try {
               device = (await listDevices(pairing)).find((d) => d.id === other.device_id)?.name ?? device
@@ -234,6 +249,10 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
             }
             if (!cancelled) setResume({ progress: other, device })
           }
+          const onData = () => void checkResume()
+          dataChanged.addEventListener('change', onData)
+          stopResumeWatch = () => dataChanged.removeEventListener('change', onData)
+          await checkResume()
         }
       } catch (e) {
         console.error(e)
@@ -245,13 +264,18 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
     })()
 
     window.addEventListener('keydown', onKey)
-    const onHide = () => document.visibilityState === 'hidden' && flushSave()
+    // The page may be closing: save, then one keepalive push gets the position to the hub.
+    const onLeave = () => void flushSave().then(() => syncNow({ keepalive: true }))
+    const onHide = () => document.visibilityState === 'hidden' && onLeave()
     document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', onLeave)
     return () => {
       cancelled = true
+      stopResumeWatch()
       window.removeEventListener('keydown', onKey)
       document.removeEventListener('visibilitychange', onHide)
-      flushSave()
+      window.removeEventListener('pagehide', onLeave)
+      void flushSave()
       view?.close()
       view?.remove()
       viewRef.current = null
@@ -290,8 +314,12 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
     const target = popover
     setPopover(null)
     if (!target?.cfi || !target.text) return
-    await createHighlight({ bookId, locator: target.cfi, text: target.text, color, comment,
-                            fraction: viewRef.current?.lastLocation?.fraction ?? 0 })
+    try {
+      await createHighlight({ bookId, locator: target.cfi, text: target.text, color, comment,
+                              fraction: viewRef.current?.lastLocation?.fraction ?? 0 })
+    } catch (e) {
+      notify(e instanceof Error ? e.message : String(e))
+    }
     clearSelections()
   }
 

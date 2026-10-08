@@ -32,8 +32,8 @@ def pair(client, config, name="Test PC") -> dict:
 
 
 def upload(client, auth, data=None, name="book.pdf"):
-    return client.post("/books", headers=auth,
-                       files={"file": (name, data or pdf_bytes("Thinking, Fast and Slow"))})
+    return client.post("/books", params={"filename": name}, headers=auth,
+                       content=data or pdf_bytes("Thinking, Fast and Slow"))
 
 
 def test_public_endpoints(client):
@@ -139,3 +139,23 @@ def test_static_client_with_spa_fallback(config, tmp_path):
     assert client.get("/../secret.txt").status_code == 404
     assert client.get("/nope").status_code == 404
     assert client.get("/health").json()["ok"] is True
+
+
+def test_upload_without_a_token_is_refused_before_the_body_is_read(client):
+    response = client.post("/books?filename=x.pdf", content=b"%PDF-1.7" + b"0" * 1024,
+                           headers={"Content-Type": "application/octet-stream"})
+    assert response.status_code == 401
+
+
+def test_declared_oversize_upload_is_refused_up_front(client, config):
+    auth = pair(client, config)
+    response = client.post("/books?filename=big.pdf", content=b"x",
+                           headers={**auth, "Content-Length": str(600 * 1024 * 1024)})
+    assert response.status_code == 413
+
+
+def test_raw_upload_uses_the_given_filename(client, config):
+    auth = pair(client, config)
+    response = client.post("/books?filename=My%20Notes.txt", content="سلام".encode(),
+                           headers={**auth, "Content-Type": "application/octet-stream"})
+    assert response.status_code == 201 and response.json()["title"] == "My Notes"

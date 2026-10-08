@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { ApiError, pullChanges, pushChanges } from './api'
-import { db, getCursor, getPairing, setCursor } from './db'
+import { db, getCursor, getPairing, resetSyncedData, setCursor } from './db'
 import { mergeHighlight } from './merge'
+import { notify } from './notices'
 import type { Book, Highlight, Pairing, Progress, PulledChange } from './types'
 
 export type SyncState = 'idle' | 'syncing' | 'offline' | 'unpaired' | 'error'
 
 const PUSH_BATCH = 200
+const KEEPALIVE_BATCH = 50  // keepalive request bodies are capped at 64 KB
 const listeners = new Set<(state: SyncState) => void>()
 let state: SyncState = 'idle'
 let running: Promise<void> | null = null
@@ -35,20 +37,28 @@ function notifyData() {
   dataChanged.dispatchEvent(new Event('change'))
 }
 
-async function pushOutbox(pairing: Pairing): Promise<void> {
+const ENTITY_LABEL = { highlight: 'a highlight', progress: 'your reading position',
+                       book: 'a library change' } as const
+
+async function pushOutbox(pairing: Pairing, keepalive: boolean): Promise<void> {
   const d = await db()
   for (;;) {
-    const keys = (await d.getAllKeys('outbox')).slice(0, PUSH_BATCH)
+    const keys = (await d.getAllKeys('outbox')).slice(0, keepalive ? KEEPALIVE_BATCH : PUSH_BATCH)
     if (keys.length === 0) return
-    const changes = await Promise.all(keys.map((k) => d.get('outbox', k)))
-    const { results } = await pushChanges(pairing, changes.filter((c) => c !== undefined))
+    const changes = (await Promise.all(keys.map((k) => d.get('outbox', k))))
+      .filter((c) => c !== undefined)
+    const { results } = await pushChanges(pairing, changes, keepalive)
     const tx = d.transaction('outbox', 'readwrite')
     for (const result of results) {
       // Accepted and ignored are both settled: the pull brings the hub's winner.
-      if (result.status === 'rejected') console.warn('hub rejected a change:', result.reason)
+      if (result.status === 'rejected') {
+        const what = ENTITY_LABEL[changes[result.index]?.entity] ?? 'a change'
+        notify(`The hub refused ${what}: ${result.reason ?? 'no reason given'}`)
+      }
       await tx.store.delete(keys[result.index])
     }
     await tx.done
+    if (keepalive) return  // one small batch is all a closing page can send
   }
 }
 
@@ -78,6 +88,13 @@ async function pullAll(pairing: Pairing): Promise<boolean> {
   let changed = false
   for (;;) {
     const page = await pullChanges(pairing, cursor)
+    if (page.latest < cursor) {
+      // The hub has fewer changes than we have seen: it was reset. Rebuild from zero.
+      await resetSyncedData()
+      cursor = 0
+      changed = true
+      continue
+    }
     if (page.changes.length) {
       await applyRemote(page.changes)
       changed = true
@@ -88,7 +105,7 @@ async function pullAll(pairing: Pairing): Promise<boolean> {
   }
 }
 
-async function runOnce(): Promise<void> {
+async function runOnce(keepalive: boolean): Promise<void> {
   const pairing = await getPairing()
   if (!pairing) {
     setState('unpaired')
@@ -96,8 +113,8 @@ async function runOnce(): Promise<void> {
   }
   setState('syncing')
   try {
-    await pushOutbox(pairing)
-    if (await pullAll(pairing)) notifyData()
+    await pushOutbox(pairing, keepalive)
+    if (!keepalive && await pullAll(pairing)) notifyData()
     backoff = 0
     setState('idle')
   } catch (e) {
@@ -112,8 +129,12 @@ async function runOnce(): Promise<void> {
   }
 }
 
-/** Push the outbox and pull new changes. Concurrent calls coalesce into one extra run. */
-export function syncNow(): Promise<void> {
+/**
+ * Push the outbox and pull new changes. Concurrent calls coalesce into one extra run.
+ * `keepalive` sends one small push that survives the page closing (no pull).
+ */
+export function syncNow(options: { keepalive?: boolean } = {}): Promise<void> {
+  if (options.keepalive) return runOnce(true)
   if (running) {
     again = true
     return running
@@ -121,7 +142,7 @@ export function syncNow(): Promise<void> {
   running = (async () => {
     do {
       again = false
-      await runOnce()
+      await runOnce(false)
     } while (again)
   })().finally(() => {
     running = null

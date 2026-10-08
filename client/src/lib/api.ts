@@ -55,9 +55,13 @@ export async function health(hubUrl: string) {
 }
 
 export async function uploadBook(pairing: Pairing, file: File): Promise<Book> {
-  const form = new FormData()
-  form.append('file', file, file.name)
-  return (await request(pairing, '/books', { method: 'POST', body: form })).json()
+  // Raw body, not multipart: the hub checks the token before reading any of it.
+  const response = await request(pairing, `/books?filename=${encodeURIComponent(file.name)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  })
+  return response.json()
 }
 
 export async function fetchBookFile(pairing: Pairing, bookId: string): Promise<Blob> {
@@ -68,9 +72,10 @@ export async function fetchCover(pairing: Pairing, bookId: string): Promise<Blob
   return (await request(pairing, `/books/${bookId}/cover`)).blob()
 }
 
-export async function pushChanges(pairing: Pairing, changes: Change[]) {
+export async function pushChanges(pairing: Pairing, changes: Change[], keepalive = false) {
   const response = await request(pairing, '/sync/push', {
     method: 'POST',
+    keepalive,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ changes }),
   })
@@ -81,7 +86,8 @@ export async function pushChanges(pairing: Pairing, changes: Change[]) {
 
 export async function pullChanges(pairing: Pairing, since: number) {
   const response = await request(pairing, `/sync/pull?since=${since}&limit=500`)
-  return (await response.json()) as { changes: PulledChange[]; cursor: number; more: boolean }
+  return (await response.json()) as { changes: PulledChange[]; cursor: number; more: boolean
+                                       latest: number }
 }
 
 export interface Device { id: string; name: string; paired_at: string; last_seen: string

@@ -2,7 +2,7 @@
 import { type FormEvent, useEffect, useState } from 'react'
 
 import { health, normalizeHubUrl, pair } from '../lib/api'
-import { setPairing } from '../lib/db'
+import { resetSyncedData, setPairing } from '../lib/db'
 import { navigate } from '../lib/hooks'
 import { notifyData, syncNow } from '../lib/sync'
 
@@ -37,6 +37,8 @@ export function PairScreen() {
     try {
       const url = normalizeHubUrl(hubUrl)
       const { device_id, token } = await pair(url, code, name.trim() || guessDeviceName())
+      // A new pairing may be a different or rebuilt hub: rebuild synced data from zero.
+      await resetSyncedData()
       await setPairing({ hubUrl: url, token, deviceId: device_id, deviceName: name.trim() })
       navigate('/', true)
       notifyData()

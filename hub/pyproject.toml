@@ -11,7 +11,6 @@ dependencies = [
     "fastapi>=0.142.4",
     "platformdirs>=4.12.4",
     "pymupdf>=1.28.2",
-    "python-multipart>=0.0.32",
     "python-ulid>=4.0.1",
     "qrcode>=8.2",
     "sqlite-vec>=0.1.9",

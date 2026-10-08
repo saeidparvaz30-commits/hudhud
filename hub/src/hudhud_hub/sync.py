@@ -199,6 +199,20 @@ def push(conn: sqlite3.Connection, device_id: str, changes: list, now: str
     """Apply a batch. Returns per-change results and the books whose highlights changed."""
     results: list[dict] = []
     touched: set[str] = set()
+    # One write transaction for the batch: concurrent pushes queue on the lock
+    # (busy_timeout) instead of failing halfway with SQLITE_BUSY.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        _push_batch(conn, device_id, changes, now, results, touched)
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+    return results, touched
+
+
+def _push_batch(conn, device_id: str, changes: list, now: str, results: list[dict],
+                touched: set[str]) -> None:
     for index, change in enumerate(changes):
         try:
             if not isinstance(change, dict) or not isinstance(change.get("data"), dict):
@@ -224,9 +238,13 @@ def push(conn: sqlite3.Connection, device_id: str, changes: list, now: str
                 raise
             conn.execute("RELEASE change")
             results.append({"index": index, "status": status})
-        except (Rejected, ValueError) as e:
+        except Rejected as e:
             results.append({"index": index, "status": "rejected", "reason": str(e)})
-    return results, touched
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
+            # Wrong JSON shapes (a list where text belongs, and so on) are the
+            # sender's problem: reject that record, never fail the batch.
+            results.append({"index": index, "status": "rejected",
+                            "reason": f"malformed record ({type(e).__name__})"})
 
 
 def record_book_import(conn: sqlite3.Connection, book_id: str, device_id: str, now: str) -> dict:
@@ -247,5 +265,8 @@ def pull(conn: sqlite3.Connection, since: int, limit: int = 500) -> dict:
          "data": json.loads(r[4]), "device_id": r[5], "ts": r[6]}
         for r in rows
     ]
+    latest = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM changes").fetchone()[0]
+    # `latest` lets a client whose cursor is ahead of the hub (the hub was reset)
+    # notice, start again from zero and re-pull everything.
     return {"changes": changes, "cursor": rows[-1][0] if rows else since,
-            "more": len(rows) == limit}
+            "more": len(rows) == limit, "latest": latest}

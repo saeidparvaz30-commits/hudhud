@@ -110,3 +110,20 @@ def test_two_devices_converge(conn, book):
     push(conn, "phone", phone, T2)
     rows = {r[0]: r[1] for r in conn.execute("SELECT id, comment FROM highlights")}
     assert rows == {HID: "from pc", "01JB7X3K9Q2M4N5P6R7S8T9V0Z": ""}
+
+
+@pytest.mark.parametrize("bad", [
+    hl(color=[]),
+    hl(fraction=None),
+    {"entity": "highlight", "data": {"id": HID, "updated_at": T0, "book_id": ["x"]}},
+    {"entity": ["highlight"], "data": {}},
+])
+def test_malformed_values_are_rejections_not_crashes(conn, book, bad):
+    results, _ = push(conn, "phone", [bad, hl()], T0)
+    assert statuses(results) == ["rejected", "accepted"]
+
+
+def test_pull_reports_the_latest_seq_so_clients_detect_a_reset_hub(conn, book):
+    record_book_import(conn, BOOK_ID, "pc", T0)
+    page = pull(conn, 999)
+    assert page["changes"] == [] and page["latest"] == 1

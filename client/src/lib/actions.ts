@@ -5,6 +5,10 @@ import { ulid, utcNow } from './ids'
 import { notifyData, syncNow } from './sync'
 import type { Book, Highlight, HighlightColor, Pairing } from './types'
 
+// The hub's limits (sync.py MAX_TEXT, MAX_LOCATOR): checked here so nothing is lost later.
+const MAX_HIGHLIGHT_TEXT = 20_000
+const MAX_LOCATOR = 4_000
+
 async function requirePairing(): Promise<Pairing> {
   const pairing = await getPairing()
   if (!pairing) throw new Error('This device is not paired with a hub')
@@ -17,16 +21,21 @@ export async function saveProgress(bookId: string, locator: string, fraction: nu
                      fraction: Math.min(1, Math.max(0, fraction)), updated_at: utcNow() }
   await commitLocal({ entity: 'progress', op: 'upsert', data: { ...progress } },
                     (tx) => tx.objectStore('progress').put(progress))
+  void syncNow()  // other devices should see where you stopped without waiting a minute
 }
 
 export async function createHighlight(input: { bookId: string; locator: string; fraction: number
                                                text: string; color: HighlightColor
                                                comment?: string }): Promise<Highlight> {
+  const text = input.text.trim()
+  if (text.length > MAX_HIGHLIGHT_TEXT || input.locator.length > MAX_LOCATOR) {
+    throw new Error('That selection is too long to highlight. Try a shorter passage.')
+  }
   const pairing = await requirePairing()
   const now = utcNow()
   const highlight: Highlight = {
     id: ulid(), book_id: input.bookId, locator: input.locator,
-    fraction: Math.min(1, Math.max(0, input.fraction)), text: input.text.trim(),
+    fraction: Math.min(1, Math.max(0, input.fraction)), text,
     color: input.color, comment: input.comment ?? '', created_at: now, updated_at: now,
     device_id: pairing.deviceId, deleted: false,
   }
