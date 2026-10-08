@@ -116,12 +116,12 @@ export function Settings() {
   const section = 'relative z-10 mt-6 rounded-xl border border-rule bg-raised/70 p-5'
 
   return (
-    <div className="paper-grain min-h-full">
-      <header className="relative z-10 mx-auto flex max-w-2xl items-center gap-2 px-4 pt-6">
+    <div className="paper-grain safe-x min-h-full">
+      <header className="relative z-10 mx-auto flex max-w-2xl items-center gap-2 px-4 pt-[calc(1.5rem+var(--safe-top))]">
         <IconButton icon="back" label="Back to library" onClick={() => navigate('/')} />
         <h1 className="font-serif text-2xl">Settings</h1>
       </header>
-      <main className="mx-auto max-w-2xl px-4 pb-16">
+      <main className="mx-auto max-w-2xl px-4 pb-[calc(4rem+var(--safe-bottom))]">
         <section className={section}>
           <h2 className="font-medium">Appearance</h2>
           <div className="mt-3 flex gap-3">

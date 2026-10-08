@@ -14,7 +14,7 @@ export function Notices() {
 
   if (!notices.length) return null
   return (
-    <div className="fixed inset-x-0 bottom-16 z-[60] mx-auto flex w-full max-w-md flex-col gap-2 px-4"
+    <div className="fixed inset-x-0 bottom-[calc(4rem+var(--safe-bottom))] z-[60] mx-auto flex w-full max-w-md flex-col gap-2 px-4"
          role="status" aria-live="polite">
       {notices.map((n) => (
         <div key={n.id}

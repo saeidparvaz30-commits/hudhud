@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
+import { SystemBars, SystemBarsStyle } from '@capacitor/core'
+
+import { isNativeApp } from './native'
 import { dataChanged, onSync, type SyncState, syncState } from './sync'
 
 /** Re-runs `load` whenever local data changes (local edits or a sync pull). */
@@ -116,6 +119,11 @@ export function usePrefs(): ReadingPrefs {
     document.documentElement.dataset.theme = value.theme
     const paper = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim()
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', paper)
+    if (isNativeApp()) {
+      // Dark clock and icons on paper and sepia, light ones at night.
+      const style = value.theme === 'night' ? SystemBarsStyle.Dark : SystemBarsStyle.Light
+      void SystemBars.setStyle({ style }).catch(() => undefined)
+    }
   }, [value.theme])
   return value
 }
