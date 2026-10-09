@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHighlight, saveProgress } from './actions'
 import { clearAll, db, getCursor, getPairing, resetSyncedData, setCursor, setPairing } from './db'
 import { onNotice } from './notices'
-import { syncNow } from './sync'
+import { flushBeforeUnpair, syncNow } from './sync'
 import type { Book, Change } from './types'
 
 const HUB = 'http://hub.test'
@@ -156,5 +156,34 @@ describe('finding the hub', () => {
     const pairing = await getPairing()
     expect(pairing?.hubUrls).toEqual([HUB, 'http://10.0.0.7:8765'])
     expect(pairing?.hubId).toBe('h1')
+  })
+})
+
+describe('unpairing', () => {
+  it('sends what is waiting before letting go', async () => {
+    await (await db()).add('outbox', { entity: 'progress', op: 'upsert',
+                                       data: { book_id: BOOK.id, locator: 'cfi', fraction: 0.5 } })
+    expect(await flushBeforeUnpair()).toBe(0)
+    expect(calls.some((c) => c.path === '/sync/push')).toBe(true)
+  })
+
+  it('reports how many changes would be lost when the hub is away', async () => {
+    await (await db()).add('outbox', { entity: 'progress', op: 'upsert',
+                                       data: { book_id: BOOK.id, locator: 'cfi', fraction: 0.5 } })
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    expect(await flushBeforeUnpair()).toBe(1)
+  })
+})
+
+describe('highlighting', () => {
+  it('highlighting the same selection again recolours it instead of adding a twin', async () => {
+    const input = { bookId: BOOK.id, locator: 'epubcfi(/6/4!/4/2,/1:0,/1:9)', fraction: 0.2,
+                    text: 'a passage' }
+    const first = await createHighlight({ ...input, color: 'yellow' })
+    const second = await createHighlight({ ...input, color: 'green' })
+    const live = (await (await db()).getAll('highlights')).filter((h) => !h.deleted)
+    expect(live).toHaveLength(1)
+    expect(second.id).toBe(first.id)
+    expect(live[0].color).toBe('green')
   })
 })

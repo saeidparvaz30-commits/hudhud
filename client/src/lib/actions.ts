@@ -32,13 +32,21 @@ export async function createHighlight(input: { bookId: string; locator: string; 
   if (text.length > MAX_HIGHLIGHT_TEXT || input.locator.length > MAX_LOCATOR) {
     throw new Error('That selection is too long to highlight. Try a shorter passage.')
   }
+  const kind = input.kind ?? 'text'
+  const twin = (await (await db()).getAllFromIndex('highlights', 'by_book', input.bookId))
+    .find((h) => !h.deleted && h.locator === input.locator && (h.kind ?? 'text') === kind)
+  if (twin) {
+    // The same selection highlighted again: recolour it rather than stack a second record.
+    return updateHighlight(twin, { color: input.color,
+                                   ...(input.comment ? { comment: input.comment } : {}) })
+  }
   const pairing = await requirePairing()
   const now = utcNow()
   const highlight: Highlight = {
     id: ulid(), book_id: input.bookId, locator: input.locator,
     fraction: Math.min(1, Math.max(0, input.fraction)), text,
     color: input.color, comment: input.comment ?? '', created_at: now, updated_at: now,
-    device_id: pairing.deviceId, deleted: false, kind: input.kind ?? 'text',
+    device_id: pairing.deviceId, deleted: false, kind,
   }
   await commitLocal({ entity: 'highlight', op: 'upsert', data: { ...highlight } },
                     (tx) => tx.objectStore('highlights').put(highlight))

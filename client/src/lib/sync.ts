@@ -182,6 +182,25 @@ async function runOnce(keepalive: boolean, relocated = false): Promise<void> {
 }
 
 /**
+ * Send everything waiting before this device unpairs. Returns how many changes and
+ * pictures are still unsent: unpairing now would lose them.
+ */
+export async function flushBeforeUnpair(): Promise<number> {
+  const pairing = await getPairing()
+  if (pairing) {
+    try {
+      await pushOutbox(pairing, false)
+      await uploadPictures(pairing)
+    } catch {
+      /* whatever is left is counted below */
+    }
+  }
+  const d = await db()
+  const pictures = (await d.getAll('images')).filter((entry) => !entry.uploaded).length
+  return (await d.count('outbox')) + pictures
+}
+
+/**
  * Push the outbox and pull new changes. Concurrent calls coalesce into one extra run.
  * `keepalive` sends one small push that survives the page closing (no pull).
  */

@@ -14,6 +14,8 @@ export interface PopoverTarget {
   /** A new selection (or a tapped picture)... */
   cfi?: string
   text?: string
+  /** Where the selection lies in the whole book (0 to 1). */
+  fraction?: number | null
   picture?: Element
   /** ...or an existing highlight. */
   existing?: Highlight

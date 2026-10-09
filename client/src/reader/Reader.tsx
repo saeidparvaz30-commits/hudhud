@@ -15,7 +15,8 @@ import type { Book, Highlight, HighlightColor, Progress, SearchResult } from '..
 import { bookCss, type FoliateView, HIGHLIGHT_CSS, loadFoliate, type RelocateDetail,
          type TocItem, toFoliateFile } from './foliate'
 import { HighlightPopover, type PopoverTarget } from './HighlightPopover'
-import { drawableLocator, navigationTarget, sectionCfi, storedLocator } from './locators'
+import { bookFraction, drawableLocator, navigationTarget, rangeOffset, sectionCfi,
+         storedLocator } from './locators'
 import { pdfToFb2 } from './pdfText'
 import { pictureAt, pictureBlob, pictureCaption } from './pictures'
 import { linkFor, type RelatedState } from './related'
@@ -41,6 +42,16 @@ const TEXT_VIEW_CACHE = (id: string) => `${id}:text-v2`  // v2: with figures
 const viewKey = (id: string) => `hudhud.view.${id}`
 
 /** Phones get the reflowed text view by default; a choice per book is remembered. */
+/** Where a selection lies in the whole book, or null if foliate cannot tell. */
+function selectionFraction(view: FoliateView, index: number, doc: Document,
+                           range: Range): number | null {
+  try {
+    return bookFraction(view.getSectionFractions(), index, rangeOffset(doc, range))
+  } catch {
+    return null
+  }
+}
+
 function initialPdfView(bookId: string): PdfView {
   try {
     const saved = localStorage.getItem(viewKey(bookId))
@@ -297,7 +308,8 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
         const cfi = view.getCFI(index, range)
         if (cfi === lastCfi) return
         lastCfi = cfi
-        openPopover(doc, range, { cfi: storedLocator(cfi, isText), text })
+        openPopover(doc, range, { cfi: storedLocator(cfi, isText), text,
+                                  fraction: selectionFraction(view, index, doc, range) })
       }
       let timer: ReturnType<typeof setTimeout> | undefined
       doc.addEventListener('pointerup', () => setTimeout(checkSelection, 20))
@@ -320,7 +332,7 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
             range.selectNode(picture)
             const cfi = view.getCFI(index, range)
             openPopover(doc, range, { cfi: storedLocator(cfi, isText), text: pictureCaption(picture),
-                                      picture })
+                                      fraction: selectionFraction(view, index, doc, range), picture })
             return
           }
           if ((e.target as Element | null)?.closest?.('a')) return
@@ -507,7 +519,7 @@ export function Reader({ bookId, highlightId }: { bookId: string; highlightId?: 
     try {
       const image = target.picture ? await pictureBlob(target.picture) : undefined
       await createHighlight({ bookId, locator: target.cfi, text: target.text, color, comment,
-                              fraction: viewRef.current?.lastLocation?.fraction ?? 0,
+                              fraction: target.fraction ?? viewRef.current?.lastLocation?.fraction ?? 0,
                               kind: target.picture ? 'image' : 'text', image })
     } catch (e) {
       notify(e instanceof Error ? e.message : String(e))

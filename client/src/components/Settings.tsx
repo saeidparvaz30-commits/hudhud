@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { createInvite, type Device, health, type Invite, listDevices, revokeDevice } from '../lib/api'
 import { clearAll, getPairing } from '../lib/db'
 import { navigate, setPrefs, type Theme, useLive, usePrefs } from '../lib/hooks'
+import { flushBeforeUnpair } from '../lib/sync'
 import { IconButton } from './Icon'
 
 const SOURCE = 'https://github.com/saeidparvaz30-commits/hudhud'
@@ -107,6 +108,9 @@ export function Settings() {
   }
 
   async function unpair() {
+    const unsent = await flushBeforeUnpair()
+    if (unsent && !window.confirm(`${unsent === 1 ? '1 change has' : `${unsent} changes have`} not `
+        + 'reached the hub yet and will be lost. Unpair anyway?')) return
     if (pairing) await revokeDevice(pairing, pairing.deviceId).catch(() => undefined)
     await clearAll()
     navigate('/', true)

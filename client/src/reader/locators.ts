@@ -39,3 +39,25 @@ export function navigationTarget(locator: string, textView: boolean): string | n
   if (drawable) return drawable
   return sectionIndex(locator) ?? 0
 }
+
+/**
+ * Where in the whole book a point lies: `within` (0 to 1) of the way through section
+ * `index`, given foliate's section start fractions. Null if the section is unknown.
+ */
+export function bookFraction(sectionFractions: number[], index: number,
+                             within: number): number | null {
+  const start = sectionFractions[index]
+  const end = sectionFractions[index + 1]
+  if (start === undefined || end === undefined) return null
+  const at = start + (end - start) * Math.min(1, Math.max(0, within))
+  return Math.min(1, Math.max(0, at))
+}
+
+/** How far through its document a range starts, by characters (0 to 1). */
+export function rangeOffset(doc: Document, range: Range): number {
+  const before = doc.createRange()
+  before.setStart(doc.body ?? doc.documentElement, 0)
+  before.setEnd(range.startContainer, range.startOffset)
+  const total = (doc.body ?? doc.documentElement).textContent?.length ?? 0
+  return total ? before.toString().length / total : 0
+}
