@@ -50,7 +50,7 @@ export async function pair(hubUrl: string, code: string, deviceName: string) {
 
 export async function health(hubUrl: string) {
   return (await (await request({ hubUrl }, '/health')).json()) as {
-    ok: boolean; version: string; search_ready: boolean; vault_enabled: boolean; vault_ok: boolean
+    ok: boolean; version: string; hub_id?: string; search_ready: boolean; vault_enabled: boolean; vault_ok: boolean
   }
 }
 
@@ -87,7 +87,7 @@ export async function pushChanges(pairing: Pairing, changes: Change[], keepalive
 export async function pullChanges(pairing: Pairing, since: number) {
   const response = await request(pairing, `/sync/pull?since=${since}&limit=500`)
   return (await response.json()) as { changes: PulledChange[]; cursor: number; more: boolean
-                                       latest: number }
+                                       latest: number; hub_urls?: string[] }
 }
 
 export async function uploadHighlightImage(pairing: Pairing, highlightId: string,

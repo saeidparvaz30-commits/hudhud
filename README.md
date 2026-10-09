@@ -18,8 +18,8 @@ Early but usable: a hub on your PC, a reader in any browser on PC and phone.
   linkable block IDs.
 - Changes sync through the hub; each device keeps working offline and catches up.
 
-Semantic search across your notes ("what did I write about this in other
-books?") is next.
+- Select a passage to see what you wrote about the same idea in other books
+  and in your vault (semantic search, multilingual, on your PC).
 
 ## Install
 
@@ -34,8 +34,27 @@ and tap *Scan QR code* in the app.
 **Any browser:** open the hub's address on the device and pair it the same way.
 
 Settings live in `hudhud.toml` in the data folder (`%LOCALAPPDATA%\hudhud` on
-Windows). Set `vault_path` to your Obsidian vault, and `public_url` to the
-address your phone uses (for example a Tailscale name).
+Windows). Set `vault_path` to your Obsidian vault.
+
+### Syncing your phone
+
+No account or extra service is needed. The phone syncs with the PC over your
+home Wi-Fi, and reads offline anywhere else: highlights and positions wait on
+the phone and reach the PC the next time both are home. If the PC's address on
+the network changes, the app finds it again by itself.
+
+To sync away from home too, give the hub an address the phone can reach from
+anywhere and set it as `public_url` (the phone still uses the LAN when home):
+
+- [Tailscale](https://tailscale.com) (free for personal use): install it on PC
+  and phone, run `tailscale serve --bg 8765`, and set
+  `public_url = "https://<pc>.<tailnet>.ts.net"`.
+- [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/):
+  needs a domain on Cloudflare. This puts the hub on the public internet,
+  protected only by its device tokens.
+
+Pair the phone again after setting `public_url` (or just let it sync once at
+home: it learns the new address).
 
 ## Build from source
 

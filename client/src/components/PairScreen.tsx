@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react'
 
 import { health, normalizeHubUrl, pair } from '../lib/api'
 import { resetSyncedData, setPairing } from '../lib/db'
+import { firstReachable } from '../lib/locate'
 import { navigate } from '../lib/hooks'
 import { isNativeApp, scanPairingCode } from '../lib/native'
 import { notifyData, syncNow } from '../lib/sync'
@@ -51,7 +52,7 @@ export function PairScreen() {
       }
       setHubUrl(found.hubUrl)
       setCode(found.code)
-      await pairWith(found.hubUrl, found.code)
+      await pairWith(found.hubUrl, found.code, found.hubUrls)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -62,15 +63,20 @@ export function PairScreen() {
     void pairWith(hubUrl, code)
   }
 
-  async function pairWith(hub: string, code: string) {
+  async function pairWith(hub: string, code: string, hubUrls: string[] = [hub]) {
     setBusy(true)
     setError(null)
     try {
-      const url = normalizeHubUrl(hub)
+      // An invite lists every address of the hub (LAN, maybe a remote name): use the
+      // first one this device can reach. If none answers, pairing reports the error.
+      const candidates = hubUrls.map(normalizeHubUrl)
+      const reached = await firstReachable(candidates)
+      const url = reached?.hubUrl ?? normalizeHubUrl(hub)
       const { device_id, token } = await pair(url, code, name.trim() || guessDeviceName())
       // A new pairing may be a different or rebuilt hub: rebuild synced data from zero.
       await resetSyncedData()
-      await setPairing({ hubUrl: url, token, deviceId: device_id, deviceName: name.trim() })
+      await setPairing({ hubUrl: url, token, deviceId: device_id, deviceName: name.trim(),
+                         hubId: reached?.hubId, hubUrls: candidates })
       navigate('/', true)
       notifyData()
       void syncNow()

@@ -4,7 +4,7 @@ import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createHighlight, saveProgress } from './actions'
-import { clearAll, db, getCursor, resetSyncedData, setCursor, setPairing } from './db'
+import { clearAll, db, getCursor, getPairing, resetSyncedData, setCursor, setPairing } from './db'
 import { onNotice } from './notices'
 import { syncNow } from './sync'
 import type { Book, Change } from './types'
@@ -111,5 +111,50 @@ describe('highlights', () => {
       .rejects.toThrow(/too long/)
     expect(await (await db()).count('highlights')).toBe(0)
     expect(await (await db()).count('outbox')).toBe(0)
+  })
+})
+
+describe('finding the hub', () => {
+  const OLD = 'http://192.168.1.5:8765'
+  const NEW = 'http://192.168.1.77:8765'
+
+  function serveHubAt(origin: string, hubId = 'h1') {
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+      const url = new URL(input)
+      calls.push({ path: `${url.origin}${url.pathname}`, body: undefined })
+      if (url.origin !== origin) throw new TypeError('Failed to fetch')
+      if (url.pathname === '/health') return new Response(JSON.stringify({ ok: true, hub_id: hubId }))
+      return new Response(JSON.stringify(routes[url.pathname](url, init)), { status: 200 })
+    }))
+  }
+
+  it('moves to the address the hub now answers at', async () => {
+    await setPairing({ hubUrl: OLD, token: 't', deviceId: 'pc', deviceName: 'PC', hubId: 'h1',
+                       hubUrls: [OLD] })
+    serveHubAt(NEW)
+    await syncNow()
+    expect((await getPairing())?.hubUrl).toBe(NEW)
+    expect(calls.some((c) => c.path === `${NEW}/sync/pull`)).toBe(true)
+  })
+
+  it('scans at most once every ten minutes while the hub is away', async () => {
+    await setPairing({ hubUrl: OLD, token: 't', deviceId: 'pc', deviceName: 'PC', hubId: 'h1',
+                       hubUrls: [OLD] })
+    serveHubAt('http://nowhere.test')
+    await syncNow()
+    const scanned = calls.length
+    expect(scanned).toBeGreaterThan(200)
+    await syncNow()
+    expect(calls.length - scanned).toBeLessThan(5)
+  })
+
+  it('learns the hub id and every address from a normal sync', async () => {
+    routes['/sync/pull'] = () => ({ changes: [], cursor: 0, more: false, latest: 0,
+                                    hub_urls: [HUB, 'http://10.0.0.7:8765'] })
+    routes['/health'] = () => ({ ok: true, hub_id: 'h1' })
+    await syncNow()
+    const pairing = await getPairing()
+    expect(pairing?.hubUrls).toEqual([HUB, 'http://10.0.0.7:8765'])
+    expect(pairing?.hubId).toBe('h1')
   })
 })

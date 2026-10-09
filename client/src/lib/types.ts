@@ -76,4 +76,8 @@ export interface Pairing {
   token: string
   deviceId: string
   deviceName: string
+  /** The hub's identity, so it can be recognised at a new address. */
+  hubId?: string
+  /** Every address the hub said it can be reached at. */
+  hubUrls?: string[]
 }

@@ -7,6 +7,7 @@ import hashlib
 import secrets
 import sqlite3
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 from .db import new_ulid
 
@@ -56,8 +57,10 @@ def create_pairing_code(conn: sqlite3.Connection, now: str) -> str:
     return code
 
 
-def pairing_url(base_url: str, code: str) -> str:
-    return f"{base_url}/?pair={code}"
+def pairing_url(base_url: str, code: str, others: list[str] = ()) -> str:
+    """The invite link; `hub` parameters list other addresses the hub can be reached at."""
+    query = urlencode([("pair", code)] + [("hub", url) for url in others if url != base_url])
+    return f"{base_url}/?{query}"
 
 
 def qr_svg(data: str) -> str:

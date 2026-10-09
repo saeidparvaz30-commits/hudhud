@@ -10,7 +10,8 @@ from hudhud_hub.auth import (
     redeem_pairing_code,
     revoke_device,
 )
-from hudhud_hub.config import load_config, write_template
+from hudhud_hub.cli import main
+from hudhud_hub.config import Config, lan_addresses, load_config, write_template
 
 NOW = "2026-10-08T10:00:00.000Z"
 LATER = "2026-10-08T10:11:00.000Z"
@@ -31,6 +32,23 @@ def test_settings_file_is_read(tmp_path):
     config = load_config(tmp_path)
     assert (config.port, str(config.vault_path).replace("\\", "/")) == (9000, "C:/Vault")
     assert config.base_url == "http://pc.ts.net:9000"
+
+
+def test_hub_urls_list_the_public_url_then_every_lan_address(tmp_path, monkeypatch):
+    monkeypatch.setattr("hudhud_hub.config.lan_addresses", lambda: ["192.168.1.5", "10.0.0.7"])
+    config = Config(data_dir=tmp_path, port=9000, public_url="https://pc.ts.net/")
+    assert config.hub_urls == ["https://pc.ts.net", "http://192.168.1.5:9000",
+                               "http://10.0.0.7:9000"]
+    assert Config(data_dir=tmp_path, port=9000).hub_urls == ["http://192.168.1.5:9000",
+                                                             "http://10.0.0.7:9000"]
+
+
+def test_lan_addresses_skip_loopback_and_link_local(monkeypatch):
+    monkeypatch.setattr("hudhud_hub.config.lan_address", lambda: "192.168.1.5")
+    infos = [(2, 1, 6, "", (ip, 0)) for ip in
+             ["127.0.0.1", "169.254.3.4", "10.0.0.7", "192.168.1.5", "10.0.0.7"]]
+    monkeypatch.setattr("hudhud_hub.config.socket.getaddrinfo", lambda *a, **k: infos)
+    assert lan_addresses() == ["192.168.1.5", "10.0.0.7"]
 
 
 def test_unknown_setting_is_an_error(tmp_path):
@@ -107,3 +125,9 @@ def test_frozen_app_finds_its_bundled_client(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
     assert default_client_dir() == tmp_path / "client_dist"
+
+
+def test_port_flag_reaches_the_printed_invite(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr("hudhud_hub.config.lan_addresses", lambda: ["192.168.1.5"])
+    assert main(["--data-dir", str(tmp_path), "pair", "--port", "9100"]) == 0
+    assert "http://192.168.1.5:9100/?pair=" in capsys.readouterr().out

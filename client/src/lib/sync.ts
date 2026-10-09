@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { ApiError, pullChanges, pushChanges, uploadHighlightImage } from './api'
-import { db, getCursor, getPairing, resetSyncedData, setCursor } from './db'
+import { ApiError, health, pullChanges, pushChanges, uploadHighlightImage } from './api'
+import { db, getCursor, getPairing, resetSyncedData, setCursor, setPairing } from './db'
+import { findHub } from './locate'
 import { mergeHighlight } from './merge'
 import { notify } from './notices'
 import type { Book, Highlight, Pairing, Progress, PulledChange } from './types'
@@ -9,6 +10,7 @@ export type SyncState = 'idle' | 'syncing' | 'offline' | 'unpaired' | 'error'
 
 const PUSH_BATCH = 200
 const KEEPALIVE_BATCH = 50  // keepalive request bodies are capped at 64 KB
+const SCAN_INTERVAL = 10 * 60_000  // a LAN scan costs ~250 requests; not on every retry
 const listeners = new Set<(state: SyncState) => void>()
 let state: SyncState = 'idle'
 let running: Promise<void> | null = null
@@ -104,7 +106,7 @@ async function uploadPictures(pairing: Pairing): Promise<void> {
   }
 }
 
-async function pullAll(pairing: Pairing): Promise<boolean> {
+async function pullAll(pairing: Pairing): Promise<{ changed: boolean; hubUrls?: string[] }> {
   let cursor = await getCursor()
   let changed = false
   for (;;) {
@@ -122,11 +124,31 @@ async function pullAll(pairing: Pairing): Promise<boolean> {
     }
     cursor = page.cursor
     await setCursor(cursor)
-    if (!page.more) return changed
+    if (!page.more) return { changed, hubUrls: page.hub_urls }
   }
 }
 
-async function runOnce(keepalive: boolean): Promise<void> {
+/** Remember every address the hub listed, and its id, for when its address changes. */
+async function learnHub(pairing: Pairing, hubUrls: string[] | undefined): Promise<void> {
+  const next = { ...pairing }
+  if (hubUrls?.length) next.hubUrls = [...new Set([...hubUrls, pairing.hubUrl])]
+  if (!next.hubId) next.hubId = await health(pairing.hubUrl).then((h) => h.hub_id, () => undefined)
+  if (JSON.stringify(next) !== JSON.stringify(pairing)) await setPairing(next)
+}
+
+/** The hub stopped answering: look for it at its other addresses. True if it moved. */
+async function relocate(pairing: Pairing): Promise<boolean> {
+  const d = await db()
+  const lastScan = ((await d.get('meta', 'lastScan')) as number | undefined) ?? 0
+  const scan = Date.now() - lastScan >= SCAN_INTERVAL
+  if (scan) await d.put('meta', Date.now(), 'lastScan')
+  const found = await findHub(pairing, { scan })
+  if (!found) return false
+  await setPairing({ ...pairing, hubUrl: found })
+  return true
+}
+
+async function runOnce(keepalive: boolean, relocated = false): Promise<void> {
   const pairing = await getPairing()
   if (!pairing) {
     setState('unpaired')
@@ -136,13 +158,21 @@ async function runOnce(keepalive: boolean): Promise<void> {
   try {
     await pushOutbox(pairing, keepalive)
     if (!keepalive) await uploadPictures(pairing)
-    if (!keepalive && await pullAll(pairing)) notifyData()
+    if (!keepalive) {
+      const pulled = await pullAll(pairing)
+      if (pulled.changed) notifyData()
+      await learnHub(pairing, pulled.hubUrls)
+    }
     backoff = 0
     setState('idle')
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) {
       setState('unpaired')
       return
+    }
+    if (!keepalive && !relocated && e instanceof ApiError && e.status === 0
+        && await relocate(pairing)) {
+      return runOnce(false, true)
     }
     setState(e instanceof ApiError && e.status === 0 ? 'offline' : 'error')
     backoff = Math.min(backoff ? backoff * 2 : 5_000, 300_000)  // spec 12: cap 5 min

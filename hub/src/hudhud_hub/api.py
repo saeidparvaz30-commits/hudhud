@@ -74,6 +74,7 @@ def create_app(config: Config, vault_writer: VaultWriter | None = None,
     config.library_dir.mkdir(parents=True, exist_ok=True)
     with closing(connect(config.db_path)) as conn:
         apply_migrations(conn, MIGRATIONS)
+        hub_id = conn.execute("SELECT value FROM hub_meta WHERE key = 'hub_id'").fetchone()[0]
     writer = vault_writer or VaultWriter(config)
     index = search_index
     if index is None:
@@ -116,7 +117,7 @@ def create_app(config: Config, vault_writer: VaultWriter | None = None,
 
     @app.get("/health")
     def health() -> dict:
-        return {"ok": True, "version": __version__, "search_ready": index.ready,
+        return {"ok": True, "version": __version__, "hub_id": hub_id, "search_ready": index.ready,
                 "search_error": index.error, "vault_enabled": writer.enabled,
                 "vault_ok": writer.ok()}
 
@@ -138,7 +139,7 @@ def create_app(config: Config, vault_writer: VaultWriter | None = None,
         """A paired device invites another: one-time code, link and QR for the new one."""
         now = utc_now()
         code = create_pairing_code(conn, now)
-        url = pairing_url(config.base_url, code)
+        url = pairing_url(config.base_url, code, config.hub_urls)
         return {"code": code, "display": format_code(code), "url": url, "qr_svg": qr_svg(url),
                 "expires_at": pairing_expiry(now)}
 
@@ -217,7 +218,7 @@ def create_app(config: Config, vault_writer: VaultWriter | None = None,
     @app.get("/sync/pull")
     def sync_pull(conn: Conn, device: Device, since: Annotated[int, Query(ge=0)] = 0,
                   limit: Annotated[int, Query(ge=1, le=1000)] = 500) -> dict:
-        return pull(conn, since, limit)
+        return {**pull(conn, since, limit), "hub_urls": config.hub_urls}
 
     @app.post("/search", response_model=None)
     def search(body: SearchRequest, device: Device) -> JSONResponse | dict:

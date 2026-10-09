@@ -8,6 +8,7 @@ import sys
 import threading
 import webbrowser
 from contextlib import closing
+from dataclasses import replace
 
 import qrcode
 
@@ -23,7 +24,7 @@ def _open(config: Config):
 
 
 def print_pairing(config: Config, code: str) -> None:
-    url = pairing_url(config.base_url, code)
+    url = pairing_url(config.base_url, code, config.hub_urls)
     print(f"\nPairing code: {format_code(code)}  (valid for 10 minutes, single use)")
     print(f"Open on your device: {url}\n")
     qr = qrcode.QRCode(border=1)
@@ -52,7 +53,7 @@ def cmd_serve(config: Config, args: argparse.Namespace) -> int:
     if config.vault_path is None:
         print("No vault_path set: highlights sync but are not written to Obsidian yet.")
     app = create_app(config)
-    port = args.port or config.port
+    port = config.port
     if args.announce:
         # Read by the desktop app; it opens this once /health answers.
         print(f"HUDHUD_URL {desktop_url(config, port)}", flush=True)
@@ -68,7 +69,7 @@ def cmd_serve(config: Config, args: argparse.Namespace) -> int:
     if config.client_dir is None:
         print("Client not built: run `pnpm --dir client build` to serve the reader here.")
     print(f"Hudhud hub on {config.base_url}  (data: {config.data_dir})")
-    uvicorn.run(app, host=args.host or config.host, port=port, log_level="info")
+    uvicorn.run(app, host=config.host, port=port, log_level="info")
     return 0
 
 
@@ -111,6 +112,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("devices", help="list paired devices")
     args = parser.parse_args(argv)
     config = load_config(args.data_dir)
+    # Flags win over hudhud.toml everywhere, including the addresses the hub hands out.
+    if getattr(args, "port", None):
+        config = replace(config, port=args.port)
+    if getattr(args, "host", None):
+        config = replace(config, host=args.host)
     handlers = {"serve": cmd_serve, "pair": cmd_pair, "devices": cmd_devices}
     return handlers[args.command](config, args)
 

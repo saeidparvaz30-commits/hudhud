@@ -30,9 +30,9 @@ TEMPLATE = """\
 # vault_path = "C:/Users/you/Documents/Vault"
 # vault_subfolder = "Hudhud"
 
-# Address your phone uses to reach this hub (for example a Tailscale name).
-# Defaults to this computer's LAN address.
-# public_url = "http://my-pc.tailnet-name.ts.net:8765"
+# Optional: an address your phone can reach from outside your home network (for
+# example a Tailscale name). Without it, phones sync over the LAN when at home.
+# public_url = "https://my-pc.tailnet-name.ts.net"
 
 # host = "0.0.0.0"
 # port = 8765
@@ -78,7 +78,15 @@ class Config:
 
     @property
     def base_url(self) -> str:
-        return (self.public_url or f"http://{lan_address()}:{self.port}").rstrip("/")
+        urls = self.hub_urls
+        return urls[0] if urls else f"http://localhost:{self.port}"
+
+    @property
+    def hub_urls(self) -> list[str]:
+        """Every address a device might reach this hub at: the public one, then the LAN."""
+        urls = [self.public_url.rstrip("/")] if self.public_url else []
+        urls += [f"http://{ip}:{self.port}" for ip in lan_addresses()]
+        return list(dict.fromkeys(urls))
 
 
 def default_data_dir() -> Path:
@@ -102,6 +110,18 @@ def lan_address() -> str:
             return s.getsockname()[0]
         except OSError:
             return "localhost"
+
+
+def lan_addresses() -> list[str]:
+    """Every IPv4 address of this machine that another device could reach, primary first."""
+    found = [lan_address()]
+    try:
+        found += [info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None,
+                                                            socket.AF_INET)]
+    except OSError:
+        pass
+    usable = [ip for ip in found if not ip.startswith(("127.", "169.254.")) and ip != "localhost"]
+    return list(dict.fromkeys(usable))
 
 
 def load_config(data_dir: Path | None = None) -> Config:

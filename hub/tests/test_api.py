@@ -41,6 +41,28 @@ def test_public_endpoints(client):
     assert client.get("/about").json()["license"] == "AGPL-3.0-or-later"
 
 
+def test_hub_id_is_stable_across_restarts(client, config):
+    hub_id = client.get("/health").json()["hub_id"]
+    assert len(hub_id) == 32
+    again = TestClient(create_app(config, VaultWriter(config, delay=60)))
+    assert again.get("/health").json()["hub_id"] == hub_id
+
+
+def test_pull_tells_devices_every_address_of_the_hub(client, config, monkeypatch):
+    monkeypatch.setattr("hudhud_hub.config.lan_addresses", lambda: ["192.168.1.5"])
+    auth = pair(client, config)
+    assert client.get("/sync/pull", headers=auth).json()["hub_urls"] == [
+        "http://hub.test:8765", "http://192.168.1.5:8765"]
+
+
+def test_invites_carry_every_other_address(client, config, monkeypatch):
+    monkeypatch.setattr("hudhud_hub.config.lan_addresses", lambda: ["192.168.1.5", "10.0.0.7"])
+    auth = pair(client, config)
+    invite = client.post("/pairing-codes", headers=auth).json()
+    assert invite["url"] == (f"http://hub.test:8765/?pair={invite['code']}"
+                             "&hub=http%3A%2F%2F192.168.1.5%3A8765&hub=http%3A%2F%2F10.0.0.7%3A8765")
+
+
 @pytest.mark.parametrize("method, path", [
     ("get", "/books"), ("get", "/sync/pull"), ("get", "/devices"),
     ("get", f"/books/{'a' * 64}/file"),
@@ -178,7 +200,7 @@ def test_a_paired_device_can_invite_another(client, config):
     auth = pair(client, config, "PC")
     assert client.post("/pairing-codes").status_code == 401
     invite = client.post("/pairing-codes", headers=auth).json()
-    assert invite["url"] == f"http://hub.test:8765/?pair={invite['code']}"
+    assert invite["url"].startswith(f"http://hub.test:8765/?pair={invite['code']}")
     assert invite["qr_svg"].lstrip().startswith(("<?xml", "<svg"))
     assert invite["expires_at"] > utc_now()
     phone = client.post("/pair", json={"code": invite["code"], "device_name": "Phone"})
