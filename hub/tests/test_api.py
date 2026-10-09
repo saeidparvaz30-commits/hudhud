@@ -132,6 +132,36 @@ def test_highlight_push_reaches_the_vault(client, config, app):
     assert client.get("/health").json()["vault_ok"] is True
 
 
+def test_vault_notes_pending_when_the_hub_was_killed_are_written_on_next_start(client, config):
+    auth = pair(client, config)
+    book = upload(client, auth).json()
+    now = utc_now()
+    change = {"entity": "highlight", "data": {
+        "id": HID, "book_id": book["id"], "locator": "cfi", "fraction": 0.3,
+        "text": "Written before the crash", "color": "green", "comment": "",
+        "created_at": now, "updated_at": now}}
+    client.post("/sync/push", headers=auth, json={"changes": [change]})
+    note = config.vault_path / "Hudhud" / "Thinking, Fast and Slow.md"
+    assert not note.exists()  # still waiting on the 60 s debounce when the hub dies
+    restarted = VaultWriter(config, delay=60)
+    create_app(config, restarted)
+    restarted.join_startup()
+    assert "> Written before the crash" in note.read_text(encoding="utf-8")
+
+
+def test_graceful_shutdown_writes_pending_vault_notes(config):
+    with TestClient(create_app(config, VaultWriter(config, delay=60))) as client:
+        auth = pair(client, config)
+        book = upload(client, auth).json()
+        now = utc_now()
+        client.post("/sync/push", headers=auth, json={"changes": [{"entity": "highlight", "data": {
+            "id": HID, "book_id": book["id"], "locator": "cfi", "fraction": 0.3,
+            "text": "Written at shutdown", "color": "green", "comment": "",
+            "created_at": now, "updated_at": now}}]})
+    note = config.vault_path / "Hudhud" / "Thinking, Fast and Slow.md"
+    assert "> Written at shutdown" in note.read_text(encoding="utf-8")
+
+
 def test_devices_and_revoke(client, config):
     auth = pair(client, config, "PC")
     other = pair(client, config, "Phone")

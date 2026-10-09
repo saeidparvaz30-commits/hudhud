@@ -23,6 +23,7 @@ class VaultWriter:
         self.last_error: str | None = None
         self._timers: dict[str, threading.Timer] = {}
         self._lock = threading.Lock()
+        self._startup: threading.Thread | None = None
 
     @property
     def enabled(self) -> bool:
@@ -32,9 +33,32 @@ class VaultWriter:
         vault = self.config.vault_path
         return vault is not None and vault.is_dir() and self.last_error is None
 
+    def start(self) -> None:
+        """Write the notes a previous run left pending (it was killed mid-debounce)."""
+        if not self.enabled:
+            return
+        conn = connect(self.config.db_path)
+        try:
+            pending = [r[0] for r in conn.execute("SELECT book_id FROM vault_pending")]
+        finally:
+            conn.close()
+        if pending:
+            self._startup = threading.Thread(target=lambda: [self.write_now(b) for b in pending],
+                                             daemon=True)
+            self._startup.start()
+
+    def join_startup(self) -> None:
+        if self._startup is not None:
+            self._startup.join()
+
     def schedule(self, book_id: str) -> None:
         if not self.enabled:
             return
+        conn = connect(self.config.db_path)
+        try:
+            conn.execute("INSERT OR IGNORE INTO vault_pending (book_id) VALUES (?)", (book_id,))
+        finally:
+            conn.close()
         with self._lock:
             if (timer := self._timers.pop(book_id, None)) is not None:
                 timer.cancel()
@@ -80,6 +104,7 @@ class VaultWriter:
                 (book_id,),
             ).fetchone()
             if book is None:
+                conn.execute("DELETE FROM vault_pending WHERE book_id = ?", (book_id,))
                 return None
             highlights = [
                 Highlight(r["id"], r["text"], r["comment"], r["fraction"], r["created_at"],
@@ -108,6 +133,7 @@ class VaultWriter:
                 "region_hash = excluded.region_hash",
                 (book_id, str(result.path), result.region_hash),
             )
+            conn.execute("DELETE FROM vault_pending WHERE book_id = ?", (book_id,))
             if result.conflict_path:
                 log.warning("vault note was edited inside the managed region; saved %s",
                             result.conflict_path)

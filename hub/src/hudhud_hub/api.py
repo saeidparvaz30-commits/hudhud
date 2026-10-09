@@ -7,8 +7,8 @@ dependency aliases defined inside create_app at decoration time.
 
 import re
 import sqlite3
-from collections.abc import Iterator
-from contextlib import closing
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import Annotated
 
@@ -82,7 +82,14 @@ def create_app(config: Config, vault_writer: VaultWriter | None = None,
         index = SearchIndex(config)
         index.start()
 
-    app = FastAPI(title="Hudhud hub", version=__version__)
+    writer.start()
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        yield
+        await run_in_threadpool(writer.flush)  # a graceful stop writes pending notes now
+
+    app = FastAPI(title="Hudhud hub", version=__version__, lifespan=lifespan)
     app.state.config = config
     app.state.vault = writer
     app.state.search = index
