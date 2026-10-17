@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Starts a throwaway hub for the end-to-end tests: fresh data dir and vault, the
 // download-free test embedder, serving the built client from client/dist.
 import { spawn } from 'node:child_process'

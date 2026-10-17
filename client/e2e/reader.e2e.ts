@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
