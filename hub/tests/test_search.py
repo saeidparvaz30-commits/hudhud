@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from hudhud_hub.api import create_app
 from hudhud_hub.auth import create_pairing_code
+from hudhud_hub.config import Config
 from hudhud_hub.db import MIGRATIONS, apply_migrations, connect, insert_book, utc_now
 from hudhud_hub.embedder import HashEmbedder
 from hudhud_hub.search import SearchIndex, vault_chunks
@@ -194,3 +195,13 @@ def test_model_name_is_configurable(library):
                       embedder_factory=lambda model, cache: HashEmbedder(model, cache))
     idx.load()
     assert idx.embedder.model == "some/other-model"
+
+
+def test_embed_model_hash_needs_no_download(tmp_path, monkeypatch):
+    def no_download(*_):
+        raise AssertionError("tried to load a real model")
+
+    monkeypatch.setattr("hudhud_hub.search.FastEmbedder", no_download)
+    index = SearchIndex(Config(data_dir=tmp_path, embed_model="hash"))
+    index.load()
+    assert isinstance(index.embedder, HashEmbedder)

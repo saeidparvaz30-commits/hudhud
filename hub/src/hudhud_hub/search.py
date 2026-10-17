@@ -24,7 +24,7 @@ import numpy as np
 
 from .config import Config
 from .db import connect, utc_now
-from .embedder import Embedder, FastEmbedder
+from .embedder import Embedder, FastEmbedder, HashEmbedder
 from .vault import END, INTRO, START_PREFIX
 
 log = logging.getLogger(__name__)
@@ -94,7 +94,9 @@ class SearchIndex:
 
     def load(self) -> None:
         self.config.models_dir.mkdir(parents=True, exist_ok=True)
-        self.embedder = self._factory(self.config.embed_model, self.config.models_dir)
+        # "hash" is the instant, download-free test embedder (end-to-end tests, CI).
+        factory = HashEmbedder if self.config.embed_model == "hash" else self._factory
+        self.embedder = factory(self.config.embed_model, self.config.models_dir)
 
     def start(self) -> None:
         """Load the model, catch up on everything, then follow changes (background)."""

@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# End-to-end test output
+/e2e/.data/
+/test-results/
+/playwright-report/

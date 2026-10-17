@@ -31,3 +31,6 @@ jobs:
       - run: pnpm --dir client lint
       - run: pnpm --dir client test
       - run: pnpm --dir client build
+      - uses: astral-sh/setup-uv@v6
+      - run: pnpm --dir client exec playwright install --with-deps chromium
+      - run: pnpm --dir client e2e
