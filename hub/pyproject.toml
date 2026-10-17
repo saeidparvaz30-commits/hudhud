@@ -1,6 +1,6 @@
 [project]
 name = "hudhud-hub"
-version = "0.0.1"
+version = "1.0.0"
 description = "Hudhud hub: library, sync, vault writer and semantic search"
 license = "AGPL-3.0-or-later"
 authors = [

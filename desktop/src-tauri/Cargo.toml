@@ -1,6 +1,6 @@
 [package]
 name = "hudhud-desktop"
-version = "0.1.0"
+version = "1.0.0"
 description = "Hudhud for desktop: the reader with its hub built in"
 authors = ["Saeid Sheikhi"]
 license = "AGPL-3.0-or-later"

@@ -9,7 +9,8 @@ birds to the Simorgh.
 
 ## Status
 
-Early but usable: a hub on your PC, a reader in any browser on PC and phone.
+Version 1.0: a Windows app with the hub built in, an Android app, and a reader
+in any browser on PC and phone.
 
 - Import EPUB, PDF, MOBI, AZW3, FB2, CBZ and TXT (DRM-free only).
 - Paper, sepia and night themes; Literata and Vazirmatn; right-to-left text.
@@ -22,6 +23,8 @@ Early but usable: a hub on your PC, a reader in any browser on PC and phone.
   and in your vault (semantic search, multilingual, on your PC).
 
 ## Install
+
+Download both from the [latest release](https://github.com/saeidparvaz30-commits/hudhud/releases/latest).
 
 **Windows:** run `Hudhud_<version>_x64-setup.exe`. Hudhud starts its hub and
 opens the reader, already paired. Closing the window keeps it in the tray so
@@ -73,6 +76,11 @@ pnpm; Rust for the desktop app; JDK 21 and the Android SDK for the Android app.
     pnpm --dir client exec cap sync android
     cd client/android && ./gradlew assembleDebug
 
+A release APK (`./gradlew assembleRelease`) is signed when a
+`keystore.properties` with `storeFile`, `storePassword`, `keyAlias` and
+`keyPassword` exists at `~/.hudhud/keystore.properties` or at the path in
+`HUDHUD_KEYSTORE_PROPERTIES`; otherwise it is built unsigned.
+
 ## Layout
 
     hub/         Python hub (uv project): FastAPI, SQLite, vault writer
@@ -87,6 +95,7 @@ pnpm; Rust for the desktop app; JDK 21 and the Android SDK for the Android app.
     uv run --project hub ruff check .
     pnpm --dir client test
     pnpm --dir client typecheck
+    pnpm --dir client build && pnpm --dir client e2e   # Playwright, against a throwaway hub
     pnpm --dir client dev      # hot-reloading client against a running hub
 
 ## Licence
